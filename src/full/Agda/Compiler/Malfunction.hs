@@ -9,6 +9,9 @@ import           Agda.Utils.Pretty
 import           Agda.Utils.String
 import           Agda.Utils.FileName
 import           Agda.Utils.Impossible
+import           Agda.Interaction.Options
+import           Agda.Syntax.Concrete.Name  (moduleNameParts)
+
 import           Control.Monad
 import           Control.Monad.Extra
 import           Control.Monad.Trans
@@ -74,7 +77,8 @@ backend' = Backend' {
   , options = defOptions
   , commandLineFlags = ttFlags
   , isEnabled = optMLFCompile
-  , preCompile = pure
+  -- Checks if there are metas and aborts if so.
+  , preCompile = mlfPreCompile
   , postCompile = mlfCompile
   , preModule = \_ _ fp -> pure $ Recompile fp
   , compileDef = \_env _menv def -> return def
@@ -82,6 +86,16 @@ backend' = Backend' {
   , backendVersion = Just "0.0.1"
   , scopeCheckingSuffices = False
   }
+
+
+
+mlfPreCompile :: MlfOptions -> TCM MlfOptions
+mlfPreCompile mlfOpts = do
+  allowUnsolved <- optAllowUnsolved <$> pragmaOptions
+  when allowUnsolved $ genericError $ "Unsolved meta variables are not allowed when compiling."
+  return mlfOpts
+
+
 
 
 -- TODO Needs review.
@@ -202,7 +216,7 @@ getBindings Defn{defName = q} = fmap (\t -> (q, t)) <$> toTreeless q
 
 
 -- TODO I need to clean this.
-outFile :: [ Name ] -> TCM (FilePath, FilePath)
+outFile :: [ Name ] -> TCM (FilePath, FilePath , FilePath)
 outFile m = do
   mdir <- compileDir
   let (fdir, fn) = let r = map (show . pretty) m
@@ -210,7 +224,7 @@ outFile m = do
   let dir = intercalate "/" (mdir : fdir)
       fp  = dir ++ "/" ++ (replaceExtension fn "mlf")
   liftIO $ createDirectoryIfMissing True dir
-  return (mdir, fp)
+  return (mdir, dir , fp)
 
 
 
@@ -220,14 +234,14 @@ mlfCompile opts modIsMain mods = do
   let outputName = case mnameToList agdaMod of
                     [] -> error "Impossible"
                     ms -> last ms
-  (mdir , fp) <- outFile (mnameToList agdaMod)
+  (mdir , dir , fp) <- outFile (mnameToList agdaMod)
 
   -- TODO review ?? Report debugging Information 
   mapM_ (definitionSummary opts) allDefs
 
   
   -- Perform the transformation to malfunction
-
+  writeForeignCodeToModule dir
   im <- compileToMLF opts allDefs fp
   let isMain = mappend modIsMain im -- both need to be IsMain
 
@@ -293,3 +307,17 @@ getConstructors = mapMaybe (getCons . theDef)
     getCons c@Record{}   = Just . pure . recCon $ c
     -- TODO: Stub value here!
     getCons _            = Nothing
+
+
+
+
+writeForeignCodeToModule :: FilePath -> TCM ()
+writeForeignCodeToModule dir = do
+  ifs <- map miInterface <$> Map.elems <$> getVisitedModules
+  fcs <- pure $ catMaybes $ map (Map.lookup "OCaml" . iForeignCode ) ifs
+  tlnms <- pure $ map (toTopLevelModuleName . iModuleName) ifs
+  liftIO $ ((dir ++ "/ForeignCode.ml") `writeFile` (concat $ map (someCode "") (zip fcs (map moduleNameParts tlnms)))) where
+    getCode (ForeignCode _ code)  = code
+    someCode :: String -> ([ForeignCode] , [String]) -> String
+    someCode tab (fc , (tnm : tnms)) = tab ++ "module " ++ tnm ++ " = struct\n" ++ someCode (tab ++ " ") (fc , tnms) ++ "\nend\n"
+    someCode tab (fc , []) = tab ++ (concat $ map getCode fc )
