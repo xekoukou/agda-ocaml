@@ -134,7 +134,7 @@ definitionSummary opts def = when (optDebugMLF opts) $ do
 
 
 worldB :: Binding
-worldB = Named "World" (Mblock 0 [])
+worldB = Named (Ident "World") (Mblock 0 [])
 
 -- TODO: Maybe we'd like to refactor this so that we first do something like
 -- this (in the calling function)
@@ -290,11 +290,12 @@ compileToMLF opts defs fp = do
 
 -- | "Test2.a" --> 24.1932f7ddf4cc7d3a.Test2.a
 fromSimpleIdent :: [Binding] -> Ident -> Maybe Ident
-fromSimpleIdent binds simple = listToMaybe (filter (isSuffixOf simple) (getNames binds))
+fromSimpleIdent binds (Ident simple)
+  = Ident <$> listToMaybe (filter (isSuffixOf simple) (getNames binds))
   where
     getNames = mapMaybe getName
-    getName (Named u _) = Just u
-    getName _           = Nothing
+    getName (Named (Ident u) _) = Just u
+    getName _                   = Nothing
 
 -- | Returns all constructors grouped by data type.
 getConstructors :: [Definition] -> [[QName]]

@@ -126,13 +126,13 @@ removeLets x =  x
 
 createBinds :: [(String , Term)] -> [Binding]
 createBinds [] = []
-createBinds ((var , term) : ns) = Named var term : createBinds ns
+createBinds ((var , term) : ns) = Named (Ident var) term : createBinds ns
 
 -- Second Term is the initial one and we need it to use it as a key, so we pass it at the result.
 replaceRec :: [(Integer , Term , Term)] -> UIDState [(String , (Integer , Term , Term))]
 replaceRec ((i , t , k) : []) = pure $ ("ERROR" , (i , t , k)) : []
 replaceRec ((i , t , k) : ts) =  do ar <- newUID
-                                    let rs = map (replaceTr t (Mvar ar)) (map (\(i , t , k) -> t)  ts)
+                                    let rs = map (replaceTr t (Mvar (Ident ar))) (map (\(i , t , k) -> t)  ts)
                                     nvs <- replaceRec
                                              (zip3 (map (\(i , _ , _) -> i) ts) rs (map (\(_ , _ , k) -> k) ts))
                                     pure $ (ar , (i , t , k)) : nvs

@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards, OverloadedStrings #-}
 {- |
 Module      :  Agda.Compiler.Malfunction.Compiler
 Maintainer  :  janmasrovira@gmail.com, hanghj@student.chalmers.se
@@ -58,6 +58,7 @@ import qualified Data.Set as Set
 import           Data.Tuple.Extra (first)
 import           Numeric (showHex)
 import           Data.Char (ord)
+import           GHC.Exts (IsList(..))
 
 import           Agda.Compiler.Malfunction.AST
 import           Agda.Compiler.Common
@@ -121,6 +122,8 @@ mkCompilerEnv allNames conMap = Env {
 mlfTagRange :: (Int, Int)
 mlfTagRange = (0, 199)
 
+-- TODO Combine with `mkCompilerEnv`
+{-# ANN mkCompilerEnv2 (id @String "HLint: Reduce duplication") #-}
 mkCompilerEnv2 :: [QName] -> [[(QName, Arity)]] -> Env
 mkCompilerEnv2 allNames consByDtype = Env {
   _conMap = conMap
@@ -310,7 +313,7 @@ translateApp ft xst = case ft of
     return $ Mapply f xs
 
 ident :: Int -> Ident
-ident i = "v" ++ show i
+ident i = Ident $ "v" ++ show i
 
 translateLit :: Literal -> Term
 translateLit l = case l of
@@ -451,7 +454,7 @@ translateCon nm ts = do
       tag <- askConTag nm
       arity <- askArity nm
       let diff = arity - length ts'
-          vs   = take diff $ map pure ['a'..]
+          vs   = take diff $ map (Ident . pure) ['a'..]
       return $ if diff == 0
       then Mblock tag ts'
       else case vs of
@@ -508,7 +511,7 @@ nameToIdent :: MonadReader Env m => QName -> m Ident
 nameToIdent qn = nameIdToIdent (qnameNameId qn)
 
 nameIdToIdent' :: NameId -> Maybe String -> Ident
-nameIdToIdent' (NameId a b) msuffix = ("agdaIdent" ++ hex a ++ "." ++ hex b ++ suffix)
+nameIdToIdent' (NameId a b) msuffix = Ident $ ("agdaIdent" ++ hex a ++ "." ++ hex b ++ suffix)
   where
     suffix = maybe "" ('.':) msuffix
     hex = (`showHex` "") . toInteger
@@ -580,7 +583,7 @@ qnamesIdsInTerm term = go term mempty
 
 -- | Defines a run-time error in Malfunction - equivalent to @error@ in Haskell.
 errorT :: String -> Term
-errorT err = Mapply (Mglobal ["Pervasives", "failwith"]) [Mstring err]
+errorT err = Mapply (Mglobal (fromList ["Pervasives", "failwith"])) [Mstring err]
 
 -- | Encodes a boolean value as a numerical Malfunction value.
 boolT :: Bool -> Term
