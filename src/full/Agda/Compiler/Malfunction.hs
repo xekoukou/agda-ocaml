@@ -18,6 +18,7 @@ import           Control.Monad.Trans
 import           Data.Either
 import           Data.Ix
 import           Data.List
+import           Data.Char
 import           Data.Map                            (Map)
 import qualified Data.Map                            as Map
 import           Data.Maybe
@@ -35,6 +36,7 @@ import           Agda.Compiler.Malfunction.Run
 import qualified Agda.Compiler.Malfunction.Run       as Run
 
 
+-- TODO Replace it with throwimpossible.
 _IMPOSSIBLE :: a
 _IMPOSSIBLE = error "IMPOSSIBLE"
 
@@ -248,7 +250,7 @@ mlfCompile opts modIsMain mods = do
   
     -- TODO Warn if no main function and not --no-main
   case (modIsMain /= isMain) of
-    True -> (error ("No main function defined in " ++ ((show . pretty) agdaMod) ++ " . Use --no-main to suppress this warning."))
+    True -> (genericError ("No main function defined in " ++ ((show . pretty) agdaMod) ++ " . Use --no-main to suppress this warning."))
     False -> pure ()
 
   let op = case isMain of
@@ -314,10 +316,12 @@ getConstructors = mapMaybe (getCons . theDef)
 writeForeignCodeToModule :: FilePath -> TCM ()
 writeForeignCodeToModule dir = do
   ifs <- map miInterface <$> Map.elems <$> getVisitedModules
-  fcs <- pure $ catMaybes $ map (Map.lookup "OCaml" . iForeignCode ) ifs
-  tlnms <- pure $ map (toTopLevelModuleName . iModuleName) ifs
-  liftIO $ ((dir ++ "/ForeignCode.ml") `writeFile` (concat $ map (someCode "") (zip fcs (map moduleNameParts tlnms)))) where
+  fcs <- pure $ foldr (\i s-> let mfc = (Map.lookup "OCaml" . iForeignCode) i
+                               in case mfc of
+                                    Just c -> s ++ [(c , (moduleNameParts . toTopLevelModuleName . iModuleName) i)]
+                                    _ -> s ) [] ifs
+  liftIO $ ((dir ++ "/ForeignCode.ml") `writeFile` (concat $ map (someCode "") fcs)) where
     getCode (ForeignCode _ code)  = code
     someCode :: String -> ([ForeignCode] , [String]) -> String
-    someCode tab (fc , (tnm : tnms)) = tab ++ "module " ++ tnm ++ " = struct\n" ++ someCode (tab ++ " ") (fc , tnms) ++ "\nend\n"
-    someCode tab (fc , []) = tab ++ (concat $ map getCode fc )
+    someCode tab (fc , ((fl : tnm) : tnms)) = tab ++ "module " ++ (toUpper fl : tnm) ++ " = struct\n" ++ someCode (tab ++ "  ") (fc , tnms) ++ "\n" ++ tab ++ "end\n"
+    someCode tab (fc , []) = tab ++ (intercalate ("\n\n" ++ tab) $ reverse $ map getCode fc )
