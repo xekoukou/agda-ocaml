@@ -65,11 +65,12 @@ import           Agda.Compiler.Malfunction.EraseDefs
 import           Agda.Compiler.Malfunction.Optimize
 import qualified Agda.Compiler.Malfunction.Primitive as Primitive
 
+-- A constructor can have a binding if for example , it is defined from a pragma.
+-- In that case, the NameId should be that of the binding. TODO Change this.
 data Env = Env
   { _conMap :: Map NameId ConRep
   , _qnameConcreteMap :: Map NameId String
   , _level :: Int
-  , _biBool :: Maybe (NameId, NameId)
   }
   deriving (Show)
 
@@ -106,7 +107,6 @@ mkCompilerEnv allNames conMap = Env {
   _conMap = conMap
   , _level = 0
   , _qnameConcreteMap = qnameMap
-  , _biBool = Nothing
   }
   where
     qnameMap = Map.fromList [ (qnameNameId qn, concreteName qn) | qn <- allNames ]
@@ -126,7 +126,6 @@ mkCompilerEnv2 allNames consByDtype = Env {
   _conMap = conMap
   , _level = 0
   , _qnameConcreteMap = qnameMap
-  , _biBool = findBuiltinBool (map (map fst) consByDtype)
   }
   where
     conMap = Map.fromList [ (qnameNameId qn, ConRep {..} )
@@ -378,15 +377,11 @@ translatePrimApp tp args =
 nameToTag :: MonadReader Env m => QName -> m Case
 nameToTag nm = do
   e <- ask
-  builtinbool <- builtinBool (qnameNameId nm)
-  case builtinbool of
-    Just b -> return (CaseInt (boolToInt b))
-    Nothing ->
-      ifM (isConstructor nm)
-      (Tag <$> askConTag nm)
-      (error $ "nameToTag only implemented for constructors, qname=" ++ show nm
-       ++ "\nenv:" ++ show e)
-    -- (return . Tag . fromEnum . nameId . qnameName $ nm)
+  ifM (isConstructor nm)
+   (Tag <$> askConTag nm)
+   (error $ "nameToTag only implemented for constructors, qname=" ++ show nm
+    ++ "\nenv:" ++ show e)
+ -- (return . Tag . fromEnum . nameId . qnameName $ nm)
 
 
 isConstructor :: MonadReader Env m => QName -> m Bool
@@ -452,10 +447,6 @@ usedVars term = asks _level >>= go mempty
 -- TODO: If the length of `ts` does not match the arity of `nm` then a lambda-expression must be returned.
 translateCon :: MonadReader Env m => QName -> [TTerm] -> m Term
 translateCon nm ts = do
-  builtinbool <- builtinBool (qnameNameId nm)
-  case builtinbool of
-    Just t -> return (boolT t)
-    Nothing -> do
       ts' <- mapM translateTerm ts
       tag <- askConTag nm
       arity <- askArity nm
@@ -467,21 +458,7 @@ translateCon nm ts = do
              [] -> error "lambdas should not have zero arguments."
              _ -> Mlambda vs (Mblock tag (ts' ++ map Mvar vs))
 
--- | Ugly hack to represent builtin bools as integers.
--- For now it checks whether the concrete name ends with "Bool.true" or "Bool.false"
-builtinBool :: MonadReader Env m => NameId -> m (Maybe Bool)
-builtinBool qn = do
-  isTrue <- isBuiltinTrue qn
-  if isTrue then return (Just True)
-    else do
-    isFalse <- isBuiltinFalse qn
-    if isFalse then return (Just False)
-      else return Nothing
-  where
-    isBuiltinTrue :: MonadReader Env m => NameId -> m Bool
-    isBuiltinTrue qn0 = maybe False ((==qn0) . snd) <$> asks _biBool
-    isBuiltinFalse :: MonadReader Env m => NameId -> m Bool
-    isBuiltinFalse qn0 = maybe False ((==qn0) . fst) <$> asks _biBool
+
 
 -- | The argument are all data constructors grouped by datatype.
 -- returns Maybe (false NameId, true NameId)

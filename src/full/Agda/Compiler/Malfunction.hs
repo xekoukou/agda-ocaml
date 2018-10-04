@@ -307,7 +307,6 @@ getConstructors = mapMaybe (getCons . theDef)
     -- takes as many arguments as the number of fields in that
     -- record.
     getCons c@Record{}   = Just . pure . recCon $ c
-    -- TODO: Stub value here!
     getCons _            = Nothing
 
 
