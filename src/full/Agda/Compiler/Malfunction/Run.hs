@@ -51,7 +51,7 @@ runModFile' mlf th =
     readProcess xfp [] ""
 
 withPrintInts :: Mod -> [Ident] -> Mod
-withPrintInts (MMod bs im expo) ids = MMod bs' im expo
+withPrintInts (MMod bs expo) ids = MMod bs' expo
   where
     bs' = bs ++ map printInt ids
     printInt var

@@ -2,29 +2,29 @@
 {-# OPTIONS_GHC -Wall #-}
 module Agda.Compiler.Malfunction (backend) where
 
+import           Prelude hiding ((<>))
 import           Agda.Compiler.Backend
 import           Agda.Compiler.CallCompiler
 import           Agda.Compiler.Common
 import           Agda.Utils.Pretty
-import           Agda.Utils.String
-import           Agda.Utils.FileName
-import           Agda.Utils.Impossible
 import           Agda.Interaction.Options
-import           Agda.Syntax.Concrete.Name  (moduleNameParts)
+import           Agda.Syntax.Common (isIrrelevant)
+import           Agda.TypeChecking.Primitive (getBuiltinName)
+import           Agda.TypeChecking.Monad.Builtin
+import           Agda.Utils.Lens
+import           Agda.TypeChecking.Warnings
+
+
+
 
 import           Control.Monad
 import           Control.Monad.Extra
 import           Control.Monad.Trans
 import           Data.Either
-import           Data.Ix
 import           Data.List
-import           Data.Char
 import           Data.Map                            (Map)
 import qualified Data.Map                            as Map
 import           Data.Maybe
-import           Data.Set                            (Set)
-import qualified Data.Set                            as Set
-import           System.Console.GetOpt
 import           Text.Printf
 import           System.FilePath.Posix
 import           System.Directory
@@ -32,8 +32,7 @@ import           System.Directory
 
 import           Agda.Compiler.Malfunction.AST
 import qualified Agda.Compiler.Malfunction.Compiler  as Mlf
-import           Agda.Compiler.Malfunction.Run
-import qualified Agda.Compiler.Malfunction.Run       as Run
+import           Agda.Compiler.Malfunction.Pragmas
 
 
 -- TODO Replace it with throwimpossible.
@@ -133,8 +132,6 @@ definitionSummary opts def = when (optDebugMLF opts) $ do
         GeneralizableVar{} -> error "Malfunction.definitionSummar: TODO"
 
 
-worldB :: Binding
-worldB = Named (Ident "World") (Mblock 0 [])
 
 -- TODO: Maybe we'd like to refactor this so that we first do something like
 -- this (in the calling function)
@@ -147,73 +144,18 @@ worldB = Named (Ident "World") (Mblock 0 [])
 -- | Compiles a whole module
 mlfMod
   :: [Definition]   -- ^ All visible definitions
-  -> TCM Mod
+  -> TCM (Mod , (OCamlCode , IsMain))
 mlfMod allDefs = do
-  grps' <- mapMaybeM act allDefs
-  let (primsAndAxioms, tlFunBindings) = partitionEithers grps'
-      (prims, axioms) = partitionEithers primsAndAxioms
-  env <- getCompilerEnv (getConstructors allDefs) tlFunBindings
-  let MMod funBindings im ts = compile env tlFunBindings
-      primBindings = catMaybes $ Mlf.runTranslate (mapM (uncurry Mlf.compilePrim) prims) env
-      axiomBindings = catMaybes $ Mlf.runTranslate (mapM Mlf.compileAxiom axioms) env
-  return $ MMod (worldB : axiomBindings ++ primBindings ++ funBindings) im ts
-    where
-      act :: Definition -> TCM (Maybe (Either (Either (QName, String) QName) (QName, TTerm)))
-      act def@Defn{defName = q, theDef = d} = case d of
-        Function{}                -> fmap Right <$> getBindings def
-        Primitive{ primName = s } -> return $ Just $ Left $ Left (q, s)
-        Axiom{}                   -> return $ Just $ Left $ Right q
-        _                         -> return Nothing
-
-compile :: Mlf.Env -> [(QName, TTerm)] -> Mod
-compile env bs = Mlf.compile env bs
-
-qnamesInTerm :: Set QName -> TTerm -> Set QName
-qnamesInTerm s0 t0 = go t0 s0
-  where
-    go :: TTerm -> Set QName -> Set QName
-    go t qs = case t of
-      TDef q           -> Set.insert q qs
-      TApp f args      -> foldr go qs (f:args)
-      TLam b           -> go b qs
-      TCon q           -> Set.insert q qs
-      TLet a b         -> foldr go qs [a, b]
-      TCase _ _ p alts -> foldr qnamesInAlt (go p qs) alts
-      _                -> qs
-      where
-        qnamesInAlt a qs' = case a of
-          TACon q _ t' -> Set.insert q (go t' qs')
-          TAGuard t' b -> foldr go qs' [t', b]
-          TALit _ b    -> go b qs'
+-- TODO We need to use ocCode.
+  (rmDefs , ocCode) <- partitionEithers <$> catMaybes <$> (mapM handlePragmas allDefs)
+  env <- Mlf.mkCompilerEnv rmDefs
+  (bs , im) <- Mlf.compile env rmDefs
+  pure $ (MMod bs [] , (concat ocCode , im))
+  
 
 
--- | The argument allNames is optional. If you provide an empty list concrete
--- names will not be appended to the NameId
-getCompilerEnv :: [[QName]] -> [(QName, TTerm)] -> TCM Mlf.Env
-getCompilerEnv allcons bs
-  | any ((>rangeSize Mlf.mlfTagRange) . length) allcons = error "too many constructors"
-  | otherwise = do
-      wa <- withArity allcons
-      return (Mlf.mkCompilerEnv2 allNames wa)
-  where
-    allNames = Set.toList $ foldr step mempty bs
-    step (qn, tt) acc = qnamesInTerm (Set.insert qn acc) tt
 
--- | Creates a mapping for all the constructors in the array. The constructors
--- should reference the same data-type.
-withArity :: [[QName]] -> TCM [[(QName, Int)]]
-withArity = mapM (mapM (\q -> (q,) <$> arityQName q))
 
--- | If the qnames references a constructor the arity of that constructor is returned.
-arityQName :: QName -> TCM Int
-arityQName q = f . theDef <$> getConstInfo q
-  where
-    f def = case def of
-      Constructor{} -> conArity def
-      _             -> error "Not a constructor :("
-
-getBindings :: Definition -> TCM (Maybe (QName, TTerm))
-getBindings Defn{defName = q} = fmap (\t -> (q, t)) <$> toTreeless q
 
 
 
@@ -243,12 +185,11 @@ mlfCompile opts modIsMain mods = do
 
   
   -- Perform the transformation to malfunction
-  writeForeignCodeToModule dir
-  im <- compileToMLF opts allDefs fp
+  (ocCode , im) <- compileToMLF allDefs fp
+  writeCodeToModule dir ocCode
   let isMain = mappend modIsMain im -- both need to be IsMain
 
   
-    -- TODO Warn if no main function and not --no-main
   case (modIsMain /= isMain) of
     True -> (genericError ("No main function defined in " ++ ((show . pretty) agdaMod) ++ " . Use --no-main to suppress this warning."))
     False -> pure ()
@@ -278,50 +219,94 @@ mlfCompile opts modIsMain mods = do
 --       x0 = def0
 --       ...
 --    )
-compileToMLF :: MlfOptions -> [Definition] -> FilePath -> TCM IsMain
-compileToMLF opts defs fp = do
-  modl@(MMod binds im _) <- mlfMod defs
+compileToMLF :: [Definition] -> FilePath -> TCM (OCamlCode , IsMain)
+compileToMLF defs fp = do
+  (modl , (ocCode , im)) <- mlfMod defs
   let modlTxt = prettyShow modl
   liftIO $ (fp `writeFile` modlTxt)
-  pure im 
-
-
---- Review the rest of the Code.
-
--- | "Test2.a" --> 24.1932f7ddf4cc7d3a.Test2.a
-fromSimpleIdent :: [Binding] -> Ident -> Maybe Ident
-fromSimpleIdent binds (Ident simple)
-  = Ident <$> listToMaybe (filter (isSuffixOf simple) (getNames binds))
-  where
-    getNames = mapMaybe getName
-    getName (Named (Ident u) _) = Just u
-    getName _                   = Nothing
-
--- | Returns all constructors grouped by data type.
-getConstructors :: [Definition] -> [[QName]]
-getConstructors = mapMaybe (getCons . theDef)
-  where
-    getCons :: Defn -> Maybe [QName]
-    getCons c@Datatype{} = Just (dataCons c)
-    -- The way I understand it a record is just like a data-type
-    -- except it only has one constructor and that one constructor
-    -- takes as many arguments as the number of fields in that
-    -- record.
-    getCons c@Record{}   = Just . pure . recCon $ c
-    getCons _            = Nothing
+  pure (ocCode , im) 
 
 
 
 
-writeForeignCodeToModule :: FilePath -> TCM ()
-writeForeignCodeToModule dir = do
+
+
+handlePragmas :: Definition -> TCM (Maybe (Either Definition OCamlCode))
+handlePragmas Defn{defArgInfo = info, defName = q} | isIrrelevant info = do
+  reportSDoc "compile.ghc.definition" 10 $
+           pure $ text "Not compiling" <+> (pretty q <> text ".")
+  pure $ Nothing
+handlePragmas def@Defn{defName = q , theDef = d} = do
+  reportSDoc "compile.ghc.definition" 10 $ pure $ vcat
+    [ text "Compiling" <+> pretty q <> text ":"
+    , nest 2 $ text (show d)
+    ]
+  pragma <- getOCamlPragma q
+  mbool  <- getBuiltinName builtinBool
+-- We do not need to use mlist. It seems that the haskell backend does that to increase performance.
+--  mlist  <- getBuiltinName builtinList
+  minf   <- getBuiltinName builtinInf
+  mflat  <- getBuiltinName builtinFlat
+  case d of
+      _ | Just OCDefn{} <- pragma, Just q == mflat ->
+        genericError
+          "\"COMPILE GHC\" pragmas are not allowed for the FLAT builtin."
+
+      _ | Just (OCDefn r oc) <- pragma -> setCurrentRange r $ do
+            
+        -- Check that the function isn't INLINE (since that will make this
+        -- definition pointless).
+        inline <- (^. funInline) . theDef <$> getConstInfo q
+        when inline $ warning $ UselessInline q
+        -- TODO At the moment we do not check that the type of the OCaml function corresponds to the
+        -- type of the agda function or the postulate.
+        let code = "let " ++ (prettyShow $ Mlf.nameToIdent q) ++ " = \n" ++ oc
+        pure $ Just $ Right $ code
+        
+      -- Compiling Bool
+      Datatype{} | Just q == mbool -> do
+       -- TODO It seems that the pragma Bool is not necessary for an untyped language.
+       -- only the constructors are important.
+       -- Of course, one could provide constructors for different data types for True and False
+       -- and we would not be able to provide a warning.
+                     
+        _ <- sequence_ [primTrue, primFalse] -- Just to get the proper error for missing TRUE/FALSE
+        Just true  <- getBuiltinName builtinTrue
+        Just false <- getBuiltinName builtinFalse
+        let ctr = "let " ++ (prettyShow $ Mlf.nameToIdent true) ++ " = true;;"
+        let cfl = "let " ++ (prettyShow $ Mlf.nameToIdent false) ++ " = false;;"
+        pure $ Just $ Right $ ("\n" ++ ctr ++ "\n" ++ cfl ++ "\n")
+
+
+      -- Compiling Inf
+      _ | Just q == minf -> genericError "Inf is not supported at the moment."
+
+      -- TODO We probably need to ignore all remaining axioms.
+      -- They can only be OCType or unimplemented ones, postulates without a representation.
+      Axiom{} -> do
+        case pragma of
+          Just (OCType _ _) -> pure $ Nothing
+          _ -> genericError "There are postulates that have not been defined."
+
+      Primitive{} -> pure $ Just $ Left def
+      Function{} -> pure $ Just $ Left def
+      _ -> pure $ error "Unexpected case in HandlePragmas."
+
+
+
+
+
+
+
+
+writeCodeToModule :: FilePath -> OCamlCode -> TCM ()
+writeCodeToModule dir ocCode = do
   ifs <- map miInterface <$> Map.elems <$> getVisitedModules
   fcs <- pure $ foldr (\i s-> let mfc = (Map.lookup "OCaml" . iForeignCode) i
                                in case mfc of
-                                    Just c -> s ++ [(c , (moduleNameParts . toTopLevelModuleName . iModuleName) i)]
+                                    Just c -> s ++ [c]
                                     _ -> s ) [] ifs
-  liftIO $ ((dir ++ "/ForeignCode.ml") `writeFile` (concat $ map (someCode "") fcs)) where
+  liftIO $ ((dir ++ "/FC.ml") `writeFile` ((concat $ map someCode fcs) ++ "\n\n" ++ ocCode)) where
     getCode (ForeignCode _ code)  = code
-    someCode :: String -> ([ForeignCode] , [String]) -> String
-    someCode tab (fc , ((fl : tnm) : tnms)) = tab ++ "module " ++ (toUpper fl : tnm) ++ " = struct\n" ++ someCode (tab ++ "  ") (fc , tnms) ++ "\n" ++ tab ++ "end\n"
-    someCode tab (fc , []) = tab ++ (intercalate ("\n\n" ++ tab) $ reverse $ map getCode fc )
+    someCode :: [ForeignCode] -> String
+    someCode fc = intercalate ("\n\n") $ reverse $ map getCode fc

@@ -37,7 +37,6 @@ import Data.Int
 -- `pretty` but this is not the one used for Treeless terms, so for consistency,
 -- let's go with Agda's choice.
 import Agda.Utils.Pretty
-import Agda.Compiler.Common
 import Data.Data (Data, Typeable)
 import GHC.Exts (IsList(..), IsString(..))
 
@@ -186,10 +185,7 @@ deriving newtype instance IsList   Longident
 -- beginning with the atom export."
 --
 -- | Defines a malfunction module.
-data Mod = MMod [Binding] IsMain [Term]
-
-deriving stock instance Data     IsMain
-deriving stock instance Typeable IsMain
+data Mod = MMod [Binding] [Term]
 
 deriving stock instance Show     Mod
 deriving stock instance Eq       Mod
@@ -293,13 +289,13 @@ prettyList__ :: Pretty a => [ a ] -> Doc
 prettyList__ = fsep . map pretty
 
 instance Pretty Mod where
-  pretty (MMod bs _ ts) = levelPlus "module" (map pretty bs ++ [levelPlus "export" (map pretty ts)])
+  pretty (MMod bs ts) = levelPlus "module" (map pretty bs ++ [levelPlus "export" (map pretty ts)])
   prettyPrec _ = pretty
 
 instance Pretty Term where
   pretty tt = case tt of
-    Mvar i              -> prettyIdent i
-    Mlambda is t        -> level ("lambda" <+> parens (hsep (map prettyIdent is))) (pretty t)
+    Mvar i              -> pretty i
+    Mlambda is t        -> level ("lambda" <+> parens (hsep (map pretty is))) (pretty t)
     Mapply t ts         -> levelPlus ("apply " <> pretty t) (map pretty ts)
     Mlet bs t           -> level "let" (prettyList__ bs $$ pretty t)
     Mint ic             -> pretty ic
@@ -323,11 +319,11 @@ instance Pretty Term where
 instance Pretty Binding where
   pretty b = case b of
     Unnamed t    -> level "_" (pretty t)
-    Named i t    -> level (prettyIdent i) (pretty t)
+    Named i t    -> level (pretty i) (pretty t)
     Recursive bs -> levelPlus "rec" (map showIdentTerm bs)
     where
       showIdentTerm :: (Ident, Term) -> Doc
-      showIdentTerm (i, t) = level (prettyIdent i) (pretty t)
+      showIdentTerm (i, t) = level (pretty i) (pretty t)
 
 instance Pretty IntConst where
   pretty ic = case ic of
@@ -337,10 +333,10 @@ instance Pretty IntConst where
     CBigint i -> pretty i <.> "ibig"
 
 prettyLongident :: Longident -> Doc
-prettyLongident = hsep . map prettyIdent . toList
+prettyLongident = hsep . map pretty . toList
 
-prettyIdent :: Ident -> Doc
-prettyIdent (Ident i) = text $ ('$':) $ i
+instance Pretty Ident where
+  pretty (Ident i) = text $ ('$':) $ i
 
 prettyCaseExpression :: ([Case], Term) -> Doc
 prettyCaseExpression (cs, t) = level (prettyList__ cs) (pretty t)

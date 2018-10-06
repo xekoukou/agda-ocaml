@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE RecordWildCards, OverloadedStrings #-}
 {- |
 Module      :  Agda.Compiler.Malfunction.Compiler
@@ -15,27 +16,23 @@ module Agda.Compiler.Malfunction.Compiler
   -- * Translation functions
     translateTerms
   , translateDef
-  , nameToIdent
   , compile
   , runTranslate
   -- * Data needed for compilation
   , Env(..)
   , ConRep(..)
   , Arity
-  -- , mkCompilerEnv
-  , mkCompilerEnv2
   -- * Others
   , qnameNameId
   , errorT
   , boolT
   , wildcardTerm
   , namedBinding
-  , nameIdToIdent
-  , nameIdToIdent'
+  , nameToIdent
   , mlfTagRange
   -- * Primitives
   , compilePrim
-  , compileAxiom
+  , mkCompilerEnv
   -- * Malfunction AST
   , module Agda.Compiler.Malfunction.AST
   ) where
@@ -47,12 +44,10 @@ import           Agda.Syntax.Treeless
 import           Control.Monad.Extra (ifM)
 import           Data.List.Extra (intercalate, firstJust, permutations, isSuffixOf)
 import           Control.Monad.Reader
-import           Data.Graph (SCC(AcyclicSCC, CyclicSCC))
-import qualified Data.Graph
 import           Data.Ix (inRange, rangeSize, range)
 import           Data.Map (Map)
 import qualified Data.Map as Map
-import           Data.Maybe (fromMaybe)
+import           Data.Maybe (mapMaybe , fromMaybe , maybeToList , catMaybes)
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.Tuple.Extra (first)
@@ -60,17 +55,21 @@ import           Numeric (showHex)
 import           Data.Char (ord)
 import           GHC.Exts (IsList(..))
 
-import           Agda.Compiler.Malfunction.AST
+import           Agda.TypeChecking.Monad.Base
+import           Agda.TypeChecking.Monad
 import           Agda.Compiler.Common
+import           Agda.Compiler.ToTreeless
+
+
+import           Agda.Compiler.Malfunction.AST
 import           Agda.Compiler.Malfunction.EraseDefs
 import           Agda.Compiler.Malfunction.Optimize
 import qualified Agda.Compiler.Malfunction.Primitive as Primitive
 
--- A constructor can have a binding if for example , it is defined from a pragma.
--- In that case, the NameId should be that of the binding. TODO Change this.
+
+-- Contains information about constructors that are to be inlined. Some constructors cannot be inlined.
 data Env = Env
   { _conMap :: Map NameId ConRep
-  , _qnameConcreteMap :: Map NameId String
   , _level :: Int
   }
   deriving (Show)
@@ -91,11 +90,11 @@ translateDefM :: MonadReader Env m => QName -> TTerm -> m Binding
 translateDefM qnm t
   | isRecursive = do
       tt <- translateM t
-      iden <- nameToIdent qnm
+      let iden = nameToIdent qnm
       return . Recursive . pure $ (iden, tt)
   | otherwise = do
       tt <- translateM t
-      namedBinding qnm tt
+      pure $ namedBinding qnm tt
   where
     -- TODO: I don't believe this is enough, consider the example
     -- where functions are mutually recursive.
@@ -103,32 +102,65 @@ translateDefM qnm t
     --     b = a
     isRecursive = Set.member (qnameNameId qnm) (qnamesIdsInTerm t) -- TODO: is this enough?
 
-mkCompilerEnv :: [QName] -> Map NameId ConRep -> Env
-mkCompilerEnv allNames conMap = Env {
-  _conMap = conMap
-  , _level = 0
-  , _qnameConcreteMap = qnameMap
-  }
-  where
-    qnameMap = Map.fromList [ (qnameNameId qn, concreteName qn) | qn <- allNames ]
-    showNames = intercalate "." . map (concatMap toValid . show . nameConcrete)
-    concreteName qn = showNames (mnameToList (qnameModule qn) ++ [qnameName qn])
+
+mlfTagRange :: (Int, Int)
+mlfTagRange = (0, 199)
+
+
+
+
+qnameToConc :: QName -> String
+qnameToConc qnm = concreteName qnm where
     toValid :: Char -> String
     toValid c
       | any (`inRange`c) [('0','9'), ('a', 'z'), ('A', 'Z')]
         || c == '_' = [c]
       | otherwise      = "{" ++ show (ord c) ++ "}"
+    showNames = intercalate "." . map (concatMap toValid . show . nameConcrete)
+    concreteName qn = showNames (mnameToList (qnameModule qn) ++ [qnameName qn])
 
-mlfTagRange :: (Int, Int)
-mlfTagRange = (0, 199)
 
--- TODO Combine with `mkCompilerEnv`
-{-# ANN mkCompilerEnv2 (id @String "HLint: Reduce duplication") #-}
-mkCompilerEnv2 :: [QName] -> [[(QName, Arity)]] -> Env
-mkCompilerEnv2 allNames consByDtype = Env {
+
+-- | Returns all constructors grouped by data type.
+getConstrNms :: [Definition] -> [[QName]]
+getConstrNms = mapMaybe (getCons . theDef)
+  where
+    getCons :: Defn -> Maybe [QName]
+    getCons c@Datatype{} = Just (dataCons c)
+    -- The way I understand it a record is just like a data-type
+    -- except it only has one constructor and that one constructor
+    -- takes as many arguments as the number of fields in that
+    -- record.
+    getCons c@Record{}   = Just . pure . recCon $ c
+    getCons _            = Nothing
+
+
+getConstrInfo :: [[QName]] -> TCM [[(QName , Arity)]]
+getConstrInfo allcons
+  | any ((>rangeSize mlfTagRange) . length) allcons = error "too many constructors"
+  | otherwise = do
+      withArity allcons
+
+
+-- | Creates a mapping for all the constructors in the array. The constructors
+-- should reference the same data-type.
+withArity :: [[QName]] -> TCM [[(QName, Int)]]
+withArity = mapM (mapM (\q -> (q,) <$> arityQName q))
+
+-- | If the qnames references a constructor the arity of that constructor is returned.
+arityQName :: QName -> TCM Int
+arityQName q = f . theDef <$> getConstInfo q
+  where
+    f def = case def of
+      Constructor{} -> conArity def
+      _             -> error "Not a constructor :("
+
+
+
+mkCompilerEnv' :: [[(QName, Arity)]] -> Env
+mkCompilerEnv' consByDtype = Env {
   _conMap = conMap
   , _level = 0
-  , _qnameConcreteMap = qnameMap
   }
   where
     conMap = Map.fromList [ (qnameNameId qn, ConRep {..} )
@@ -136,14 +168,14 @@ mkCompilerEnv2 allNames consByDtype = Env {
                            , (length consByDtype <= rangeSize mlfTagRange)
                              || (error "too many constructors")
                            , (_conTag, (qn, _conArity)) <- zip (range mlfTagRange) typeCons ]
-    qnameMap = Map.fromList [ (qnameNameId qn, concreteName qn) | qn <- allNames ]
-    showNames = intercalate "." . map (concatMap toValid . show . nameConcrete)
-    concreteName qn = showNames (mnameToList (qnameModule qn) ++ [qnameName qn])
-    toValid :: Char -> String
-    toValid c
-      | any (`inRange`c) [('0','9'), ('a', 'z'), ('A', 'Z')]
-        || c == '_' = [c]
-      | otherwise      = "{" ++ show (ord c) ++ "}"
+
+
+mkCompilerEnv :: [Definition] -> TCM Env
+mkCompilerEnv defs = do
+  let cns = getConstrNms defs
+  cinfo <- getConstrInfo cns
+  pure $ mkCompilerEnv' cinfo
+
 
 -- | Translate a single treeless term to a list of malfunction terms.
 --
@@ -165,7 +197,7 @@ translateTerm :: MonadReader Env m => TTerm -> m Term
 translateTerm = \case
   TVar i            -> indexToVarTerm i
   TPrim tp          -> return $ translatePrimApp tp []
-  TDef name         -> translateName name
+  TDef name         -> pure $ translateName name
   TApp t0 args      -> translateApp t0 args
   tt@TLam{}         -> translateLam tt
   TLit lit          -> return $ translateLit lit
@@ -189,7 +221,7 @@ translateTerm = \case
           d <- translateTerm deflt
           translateAltsChain t (Just d) alts
   TUnit             -> return unitT
-  TSort             -> error "Malfunction.Compiler.translateTerm: TODO"
+  TSort             -> return unitT
   TErased           -> return unitT -- TODO: We can probably erase these , but we would have to change 
                                     -- the functions that use them , reduce their arity.
                                     -- For now, we simply pass the unit type.
@@ -494,8 +526,8 @@ lookupConRep ns = Map.lookup (qnameNameId ns) <$> asks _conMap
 unitT :: Term
 unitT = Mblock 0 []
 
-translateName :: MonadReader Env m => QName -> m Term
-translateName qn = Mvar <$> nameToIdent qn
+translateName :: QName -> Term
+translateName qn = Mvar $ nameToIdent qn
 
 -- | Translate a Treeless name to a valid identifier in Malfunction
 --
@@ -507,43 +539,22 @@ translateName qn = Mvar <$> nameToIdent qn
 --
 -- [1. The Agda Wiki]: <http://wiki.portal.chalmers.se/agda/pmwiki.php?n=ReferenceManual2.Identifiers>
 -- [2. Malfunction Spec]: <https://github.com/stedolan/malfunction/blob/master/docs/spec.md>
-nameToIdent :: MonadReader Env m => QName -> m Ident
-nameToIdent qn = nameIdToIdent (qnameNameId qn)
 
-nameIdToIdent' :: NameId -> Maybe String -> Ident
+
+nameToIdent :: QName -> Ident
+nameToIdent qn = nameIdToIdent' (qnameNameId qn) (qnameToConc qn)
+
+nameIdToIdent' :: NameId -> String -> Ident
 nameIdToIdent' (NameId a b) msuffix = Ident $ ("agdaIdent" ++ hex a ++ "." ++ hex b ++ suffix)
   where
-    suffix = maybe "" ('.':) msuffix
+    suffix = ('.':) msuffix
     hex = (`showHex` "") . toInteger
 
-nameIdToIdent :: MonadReader Env m => NameId -> m Ident
-nameIdToIdent nid = do
-  x <- Map.lookup nid <$> asks _qnameConcreteMap
-  return (nameIdToIdent' nid x)
 
 -- | Translates a treeless identifier to a malfunction identifier.
 qnameNameId :: QName -> NameId
 qnameNameId = nameId . qnameName
 
--- | Compiles treeless "bindings" to a malfunction module given groups of defintions.
-compile
-  :: Env                -- ^ Environment.
-  -> [(QName, TTerm)] -- ^ List of treeless bindings.
-  -> Mod
-compile env bs = runTranslate (compileM bs) env
-
-
-compileM :: MonadReader Env m => [(QName, TTerm)] -> m Mod
-compileM allDefs = do
-  bss <- mapM translateSCC recGrps
-  let (im , bs) = eraseB bss
-  return $ MMod (optimizeLetsB bs) im []
-  where
-    translateSCC scc = case scc of
-      AcyclicSCC single -> uncurry translateBinding single
-      CyclicSCC grp -> translateMutualGroup grp
-    recGrps :: [SCC (QName, TTerm)]
-    recGrps = dependencyGraph allDefs
 
 translateMutualGroup :: MonadReader Env m => [(QName, TTerm)] -> m Binding
 translateMutualGroup bs = Recursive <$> mapM (uncurry translateBindingPair) bs
@@ -553,13 +564,10 @@ translateBinding q t = uncurry Named <$> translateBindingPair q t
 
 translateBindingPair :: MonadReader Env m => QName -> TTerm -> m (Ident, Term)
 translateBindingPair q t = do
-  iden <- nameToIdent q
+  let iden = nameToIdent q
   (\t' -> (iden, t')) <$> translateTerm t
 
-dependencyGraph :: [(QName, TTerm)] -> [SCC (QName, TTerm)]
-dependencyGraph qs = Data.Graph.stronglyConnComp
-  [ ((qn, tt), qnameNameId qn, edgesFrom tt) | (qn, tt) <- qs ]
-  where edgesFrom = Set.toList . qnamesIdsInTerm
+
 
 
 qnamesIdsInTerm :: TTerm -> Set NameId
@@ -595,35 +603,80 @@ boolToInt b = if b then 1 else 0
 trueCase :: [Case]
 trueCase = [CaseInt 1]
 
--- TODO: Stub implementation!
--- Translating axioms seem to be problematic. For the other compiler they are
--- defined in Agda.TypeChecking.Monad.Base. It is a field of
--- `CompiledRepresentation`. We do not have this luxury. So what do we do?
---
--- | Translates an axiom to a malfunction binding. Returns `Nothing` if the axiom is unmapped.
-compileAxiom ::
-  MonadReader Env m =>
-  QName                   -- The name of the axiom
-  -> m (Maybe Binding)    -- The resulting binding
-compileAxiom q = do
-                   case x of
-                     Just z -> Just <$> namedBinding q z
-                     Nothing -> pure $ Nothing
-  where
-    x = Map.lookup (show q') Primitive.axioms
-    q' = last . qnameToList $ q
+-- -- TODO: Stub implementation!
+-- -- Translating axioms seem to be problematic. For the other compiler they are
+-- -- defined in Agda.TypeChecking.Monad.Base. It is a field of
+-- -- `CompiledRepresentation`. We do not have this luxury. So what do we do?
+-- --
+-- -- | Translates an axiom to a malfunction binding. Returns `Nothing` if the axiom is unmapped.
+-- compileAxiom ::
+--   QName                 -- The name of the axiom
+--   -> Maybe Binding      -- The resulting binding
+-- compileAxiom q = do
+--                    case x of
+--                      Just z -> Just $ namedBinding q z
+--                      Nothing -> Nothing
+--   where
+--     x = Map.lookup (show q') Primitive.axioms
+--     q' = last . qnameToList $ q
 
 -- | Translates a primitive to a malfunction binding. Returns `Nothing` if the primitive is unmapped.
 compilePrim
-  :: MonadReader Env m =>
-    QName -- ^ The qname of the primitive
+  :: QName -- ^ The qname of the primitive
   -> String -- ^ The name of the primitive
-  -> m (Maybe Binding)
+  -> Maybe Binding
 compilePrim q s = case x of
-                    Just y -> Just <$> namedBinding q y
-                    Nothing -> pure $ Nothing
+                    Just y -> Just $ namedBinding q y
+                    Nothing -> Nothing
   where
     x = Map.lookup s Primitive.primitives
 
-namedBinding :: MonadReader Env m => QName -> Term -> m Binding
-namedBinding q t = (`Named`t) <$> nameToIdent q
+namedBinding :: QName -> Term -> Binding
+namedBinding q t = (`Named`t) $ nameToIdent q
+
+
+
+-- The map is used to check if the definition has already been processed.
+-- This is due to recursive definitions.
+handleFunction :: Env -> Definition -> Map QName Definition -> TCM (Map QName Definition , Maybe Binding)
+handleFunction env Defn{defName = q ,  theDef = d} rmap = do
+  case Map.lookup q rmap of
+    Nothing -> pure $ (rmap , Nothing)
+    Just _ -> case d of
+-- TODO Handle the case where it is delayed.
+      Function{funMutual = mrec} ->
+        case mrec of
+          Nothing -> do
+            mt <- toTreeless q
+            pure $ ( Map.delete q rmap , maybe Nothing (\t -> Just $ runTranslate (translateBinding q t) env) mt)
+          Just mq -> do
+            mts <- mapM (\x -> do
+                                 y <- toTreeless x
+                                 case y of
+                                   Just t -> pure $ Just (x , t)
+                                   Nothing -> pure $ Nothing ) mq
+            
+            pure $ ( foldr Map.delete rmap mq , Just $ runTranslate (translateMutualGroup (catMaybes mts)) env)
+      Primitive{primName = s} -> pure $ (Map.delete q rmap , compilePrim q s)
+      _ -> pure $ error "At handleFunction : Case not expected."
+
+
+
+handleFunctions :: Env -> [Definition] -> Map QName Definition -> TCM [Binding]
+handleFunctions env (d : ds) mp = do
+  (nmp , b) <- handleFunction env d mp
+  ((maybeToList b) ++) <$> handleFunctions env ds nmp
+handleFunctions _ [] _ = pure $ []
+              
+
+
+
+compile
+  :: Env -> [Definition]
+  -> TCM ([Binding] , IsMain)
+compile env defs = do
+  bss <- handleFunctions env defs (Map.fromList $ map (\x -> (defName x , x)) defs)
+  let (im , bs) = eraseB bss
+  pure $ (optimizeLetsB bs , im)
+
+
