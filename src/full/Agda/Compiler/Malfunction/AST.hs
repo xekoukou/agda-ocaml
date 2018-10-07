@@ -336,7 +336,7 @@ prettyLongident :: Longident -> Doc
 prettyLongident = hsep . map pretty . toList
 
 instance Pretty Ident where
-  pretty (Ident i) = text $ ('$':) $ i
+  pretty (Ident i) = text $ ('$':) i
 
 prettyCaseExpression :: ([Case], Term) -> Doc
 prettyCaseExpression (cs, t) = level (prettyList__ cs) (pretty t)

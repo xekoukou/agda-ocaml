@@ -148,7 +148,7 @@ sanityCheckPragma def (Just OCType{}) =
       nat  <- getBuiltinName builtinNat
       int  <- getBuiltinName builtinInteger
       bool <- getBuiltinName builtinBool
-      error $ show $ def -- unless (Just (defName def) `elem` [nat, int, bool]) err -- TODO Fix this
+      error $ show def -- unless (Just (defName def) `elem` [nat, int, bool]) err -- TODO Fix this
     _ -> err
   where
     err = typeError $ GenericError "OCaml types can only be given for postulates."

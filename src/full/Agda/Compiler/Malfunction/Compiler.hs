@@ -138,8 +138,7 @@ getConstrNms = mapMaybe (getCons . theDef)
 getConstrInfo :: [[QName]] -> TCM [[(QName , Arity)]]
 getConstrInfo allcons
   | any ((>rangeSize mlfTagRange) . length) allcons = error "too many constructors"
-  | otherwise = do
-      withArity allcons
+  | otherwise = withArity allcons
 
 
 -- | Creates a mapping for all the constructors in the array. The constructors
@@ -166,7 +165,7 @@ mkCompilerEnv' consByDtype = Env {
     conMap = Map.fromList [ (qnameNameId qn, ConRep {..} )
                           | typeCons <- consByDtype
                            , (length consByDtype <= rangeSize mlfTagRange)
-                             || (error "too many constructors")
+                             || error "too many constructors"
                            , (_conTag, (qn, _conArity)) <- zip (range mlfTagRange) typeCons ]
 
 
@@ -545,7 +544,7 @@ nameToIdent :: QName -> Ident
 nameToIdent qn = nameIdToIdent' (qnameNameId qn) (qnameToConc qn)
 
 nameIdToIdent' :: NameId -> String -> Ident
-nameIdToIdent' (NameId a b) msuffix = Ident $ ("agdaIdent" ++ hex a ++ "." ++ hex b ++ suffix)
+nameIdToIdent' (NameId a b) msuffix = Ident ("agdaIdent" ++ hex a ++ "." ++ hex b ++ suffix)
   where
     suffix = ('.':) msuffix
     hex = (`showHex` "") . toInteger
@@ -639,25 +638,25 @@ namedBinding q t = (`Named`t) $ nameToIdent q
 -- The map is used to check if the definition has already been processed.
 -- This is due to recursive definitions.
 handleFunction :: Env -> Definition -> Map QName Definition -> TCM (Map QName Definition , Maybe Binding)
-handleFunction env Defn{defName = q ,  theDef = d} rmap = do
+handleFunction env Defn{defName = q ,  theDef = d} rmap = 
   case Map.lookup q rmap of
-    Nothing -> pure $ (rmap , Nothing)
+    Nothing -> pure (rmap , Nothing)
     Just _ -> case d of
 -- TODO Handle the case where it is delayed.
       Function{funMutual = mrec} ->
         case mrec of
           Nothing -> do
             mt <- toTreeless q
-            pure $ ( Map.delete q rmap , maybe Nothing (\t -> Just $ runTranslate (translateBinding q t) env) mt)
+            pure ( Map.delete q rmap , maybe Nothing (\t -> Just $ runTranslate (translateBinding q t) env) mt)
           Just mq -> do
             mts <- mapM (\x -> do
                                  y <- toTreeless x
                                  case y of
                                    Just t -> pure $ Just (x , t)
-                                   Nothing -> pure $ Nothing ) mq
+                                   Nothing -> pure Nothing ) mq
             
-            pure $ ( foldr Map.delete rmap mq , Just $ runTranslate (translateMutualGroup (catMaybes mts)) env)
-      Primitive{primName = s} -> pure $ (Map.delete q rmap , compilePrim q s)
+            pure ( foldr Map.delete rmap mq , Just $ runTranslate (translateMutualGroup (catMaybes mts)) env)
+      Primitive{primName = s} -> pure (Map.delete q rmap , compilePrim q s)
       _ -> pure $ error "At handleFunction : Case not expected."
 
 
@@ -665,8 +664,8 @@ handleFunction env Defn{defName = q ,  theDef = d} rmap = do
 handleFunctions :: Env -> [Definition] -> Map QName Definition -> TCM [Binding]
 handleFunctions env (d : ds) mp = do
   (nmp , b) <- handleFunction env d mp
-  ((maybeToList b) ++) <$> handleFunctions env ds nmp
-handleFunctions _ [] _ = pure $ []
+  (maybeToList b ++) <$> handleFunctions env ds nmp
+handleFunctions _ [] _ = pure []
               
 
 
@@ -677,6 +676,6 @@ compile
 compile env defs = do
   bss <- handleFunctions env defs (Map.fromList $ map (\x -> (defName x , x)) defs)
   let (im , bs) = eraseB bss
-  pure $ (optimizeLetsB bs , im)
+  pure (optimizeLetsB bs , im)
 
 

@@ -20,7 +20,7 @@ replaceTr :: Term -> Term -> Term -> Term
 replaceTr rt ar self@(Mvar i) = caseEq rt ar self self
 replaceTr rt ar self@(Mlambda a t) = caseEq rt ar self $ Mlambda a (replaceTr rt ar t)
 replaceTr rt ar self@(Mapply a bs) = caseEq rt ar self $ let (na : nbs) = map (replaceTr rt ar) (a : bs)
-                                                         in (Mapply na nbs) 
+                                                         in Mapply na nbs 
 replaceTr rt ar self@(Mlet bs t) =  caseEq rt ar self $  let nt = replaceTr rt ar t
                                        in Mlet (map (rpl rt ar) bs) nt where
   rpl :: Term -> Term -> Binding -> Binding
@@ -29,44 +29,44 @@ replaceTr rt ar self@(Mlet bs t) =  caseEq rt ar self $  let nt = replaceTr rt a
   rpl rt ar (Recursive rs) = Recursive (zipWith (\x y -> (fst x , y)) rs (map (replaceTr rt ar . snd) rs))
 replaceTr rt ar self@(Mswitch ta tb) =  caseEq rt ar self $
                                           let nta = replaceTr rt ar ta
-                                              ntb = map (replaceTr rt ar) (map snd tb)
+                                              ntb = map (replaceTr rt ar . snd) tb
                                           in Mswitch nta (zipWith (\(c , _) nb -> (c , nb)) tb ntb)
 replaceTr rt ar self@(Mintop1 x y t) =  caseEq rt ar self $ let nt = replaceTr rt ar t
-                                    in (Mintop1 x y nt)
+                                    in Mintop1 x y nt
 replaceTr rt ar self@(Mintop2 x y ta tb ) =  caseEq rt ar self $
                                                let nta = replaceTr rt ar ta
                                                    ntb = replaceTr rt ar tb
-                                               in (Mintop2 x y nta ntb )
+                                               in Mintop2 x y nta ntb
 replaceTr rt ar self@(Mconvert x y t) =  caseEq rt ar self $
                                            let nt = replaceTr rt ar t
-                                           in (Mconvert x y nt)
+                                           in Mconvert x y nt
 replaceTr rt ar self@(Mvecnew x ta tb) =  caseEq rt ar self $
                                             let nta = replaceTr rt ar ta
                                                 ntb = replaceTr rt ar tb
-                                            in (Mvecnew x nta ntb)
+                                            in Mvecnew x nta ntb
 replaceTr rt ar self@(Mvecget x ta tb) =  caseEq rt ar self $
                                             let nta = replaceTr rt ar ta
                                                 ntb = replaceTr rt ar tb
-                                            in (Mvecget x nta ntb)
+                                            in Mvecget x nta ntb
 replaceTr rt ar self@(Mvecset x ta tb tc) =  caseEq rt ar self $
                                                let nta = replaceTr rt ar ta
                                                    ntb = replaceTr rt ar tb
                                                    ntc = replaceTr rt ar tc
-                                               in (Mvecset x nta ntb ntc)
+                                               in Mvecset x nta ntb ntc
 replaceTr rt ar self@(Mveclen x t) =  caseEq rt ar self $
                                         let nt = replaceTr rt ar t
-                                        in (Mveclen x nt)
+                                        in Mveclen x nt
 replaceTr rt ar self@(Mblock x bs) =  caseEq rt ar self $
                                         let nbs = map (replaceTr rt ar) bs
-                                        in (Mblock x nbs)
+                                        in Mblock x nbs
 replaceTr rt ar self@(Mfield x t) =  caseEq rt ar self $
                                        let nt = replaceTr rt ar t
-                                       in (Mfield x nt)
+                                       in Mfield x nt
 replaceTr rt ar x = caseEq rt ar x x
 
 
 replaceTrL :: [(Term , Term)] -> Term -> Term
-replaceTrL ((x , nx) : ms) t = let (nt : rnms) = map (replaceTr x nx) (t : (map snd ms))
+replaceTrL ((x , nx) : ms) t = let (nt : rnms) = map (replaceTr x nx) (t : map snd ms)
                                in replaceTrL (zip (map fst ms) rnms) nt
 replaceTrL [] t = t
 
@@ -90,7 +90,7 @@ removeLets self@(Mlet bs t) =  let mt = replaceTrL (map rpl bs) t
   rpl (Recursive rs) = error "Let bindings cannot be recursive."
   
 removeLets self@(Mswitch ta tb) = let nta = removeLets ta
-                                      ntb = map removeLets (map snd tb)
+                                      ntb = map (removeLets . snd) tb
                                   in Mswitch nta (zipWith (\(c , _) nb -> (c , nb)) tb ntb)
 removeLets self@(Mintop1 x y t) = let nt = removeLets t
                                   in Mintop1 x y nt
@@ -132,7 +132,7 @@ createBinds ((var , term) : ns) = Named (Ident var) term : createBinds ns
 replaceRec :: [(Integer , Term , Term)] -> UIDState [(String , (Integer , Term , Term))]
 replaceRec ((i , t , k) : []) = pure $ ("ERROR" , (i , t , k)) : []
 replaceRec ((i , t , k) : ts) =  do ar <- newUID
-                                    let rs = map (replaceTr t (Mvar (Ident ar))) (map (\(i , t , k) -> t)  ts)
+                                    let rs = map (replaceTr t (Mvar (Ident ar)) . (\(i , t , k) -> t))  ts
                                     nvs <- replaceRec
                                              (zip3 (map (\(i , _ , _) -> i) ts) rs (map (\(_ , _ , k) -> k) ts))
                                     pure $ (ar , (i , t , k)) : nvs
@@ -155,7 +155,7 @@ newUID = do
 newOID :: UIDState Integer
 newOID = do
   s <- gets snd
-  modify (\(a , b) -> (a , (1 + b)))
+  modify (\(a , b) -> (a , 1 + b))
   pure s
 
 
@@ -195,7 +195,7 @@ findCF self@(Mlet bs t) = error "We have removed all let statements"
 findCF self@(Mswitch ta tb) =  do
   (tmsa , nta) <- findCF ta
   rb <- mapM (singleCase . snd) tb
-  let inters = foldr (\x b -> M.union b (M.intersection tmsa x)) M.empty (map fst rb)
+  let inters = foldr ((\x b -> M.union b (M.intersection tmsa x)) . fst) M.empty rb
       newInters = M.map (\(a , b , c) -> (a , b , True)) inters
       all = foldr (\a b -> M.union (fst a) b) tmsa rb
       -- newInters replaces inters here.
@@ -214,35 +214,35 @@ findCF self@(Mswitch ta tb) =  do
                     let bs = createBinds (zip (map fst rs) (map (\(_ , (_ , t , _)) -> t) (init rs)))
                     -- Return them with false so as to be possibly matched with higher statements.
                     let nr = M.union (M.fromList $ map (\(_ , (i , t , k)) -> (k , (t , i , False))) (init rs)) (fst r)
-                    pure $ (nr , case bs of
-                                   [] -> ((\(_ , (_ , t , _)) -> t) (last rs))
-                                   _ -> Mlet bs ((\(_ , (_ , t , _)) -> t) (last rs)))
+                    pure (nr , case bs of
+                                 [] -> (\(_ , (_ , t , _)) -> t) (last rs)
+                                 _ -> Mlet bs ((\(_ , (_ , t , _)) -> t) (last rs)))
 
 findCF  self@(Mintop1 x y t) = do (tms , nself) <- findCF  t
-                                  pure (tms , (Mintop1 x y nself))
+                                  pure (tms , Mintop1 x y nself)
 findCF  self@(Mintop2 x y ta tb ) = do (tmsa , nta) <- findCF  ta
                                        (tmsb , ntb) <- findCF  tb
                                        let inters = M.intersection tmsa tmsb
                                            newInters = M.map (\(a , b , c) -> (a , b , True)) inters
                                            all = M.union tmsa tmsb
                                            nall = newInters `M.union` all
-                                       pure (nall , (Mintop2 x y nta ntb ))
+                                       pure (nall , Mintop2 x y nta ntb)
 findCF  self@(Mconvert x y t) = do (tms , nself) <- findCF  t
-                                   pure (tms , (Mconvert x y nself))
+                                   pure (tms , Mconvert x y nself)
 findCF  self@(Mvecnew x ta tb) =  do (tmsa , nta) <- findCF  ta
                                      (tmsb , ntb) <- findCF  tb
                                      let inters = M.intersection tmsa tmsb
                                          newInters = M.map (\(a , b , c) -> (a , b , True)) inters
                                          all = M.union tmsa tmsb
                                          nall = newInters `M.union` all
-                                     pure (nall , (Mvecnew x nta ntb))
+                                     pure (nall , Mvecnew x nta ntb)
 findCF  self@(Mvecget x ta tb) = do (tmsa , nta) <- findCF  ta
                                     (tmsb , ntb) <- findCF  tb
                                     let inters = M.intersection tmsa tmsb
                                         newInters = M.map (\(a , b , c) -> (a , b , True)) inters
                                         all = M.union tmsa tmsb
                                         nall = newInters `M.union` all
-                                    pure (nall , (Mvecget x nta ntb))
+                                    pure (nall , Mvecget x nta ntb)
 findCF  self@(Mvecset x ta tb tc) =  do (tmsa , nta) <- findCF  ta
                                         (tmsb , ntb) <- findCF  tb
                                         (tmsc , ntc) <- findCF  tc
@@ -250,9 +250,9 @@ findCF  self@(Mvecset x ta tb tc) =  do (tmsa , nta) <- findCF  ta
                                             newInters = M.map (\(a , b , c) -> (a , b , True)) inters
                                             all = M.union (M.union tmsa tmsb) tmsc
                                             nall = newInters `M.union` all
-                                        pure (nall , (Mvecset x nta ntb ntc))
+                                        pure (nall , Mvecset x nta ntb ntc)
 findCF  self@(Mveclen x t) =  do (tms , nself) <- findCF  t
-                                 pure (tms , (Mveclen x nself))
+                                 pure (tms , Mveclen x nself)
 findCF  self@(Mblock x bs) =  do
                                  rs <- mapM findCF bs
                               
@@ -260,16 +260,16 @@ findCF  self@(Mblock x bs) =  do
                                      newInters = M.map (\(a , b , c) -> (a , b , True)) inters
                                      all = foldr (\a b -> M.union (fst a) b)  M.empty rs
                                      nall = newInters `M.union` all
-                                 pure (nall , (Mblock x (map snd rs)))
+                                 pure (nall , Mblock x (map snd rs))
 findCF  self@(Mfield x t) =   do (tms , nself) <- findCF  t
-                                 pure (tms , (Mfield x nself))
+                                 pure (tms , Mfield x nself)
 findCF  x = pure (M.empty , x)
 
 
 
 introduceLets :: Term -> Term
-introduceLets t = fst $
-  runState (do 
+introduceLets t =
+  evalState (do 
                r <- findCF t
                -- All the remaining matches are introduced at the top.
                let psLets = M.filter (\(a , b , c) -> c) (fst r)
@@ -278,9 +278,9 @@ introduceLets t = fst $
                rs <- replaceRec all
                let bs = createBinds (zip (map fst rs) (map (\(_ , (_ , t , _)) -> t) (init rs)))
                pure $ case bs of
-                        [] -> ((\(_ , (_ , t , _)) -> t) (last rs))
+                        [] -> (\(_ , (_ , t , _)) -> t) (last rs)
                         _ -> Mlet bs ((\(_ , (_ , t , _)) -> t) (last rs))
-           ) (0 , 0)
+            ) (0 , 0)
 
 
 
@@ -305,12 +305,12 @@ removeLetsVar self@(Mlet bs t) = let (trm , tkp) = partitionEithers (map rpl bs)
                                         _  -> Mlet ntkp nt)         where
   rpl :: Binding -> Either (Term , Term) Binding
   rpl (Unnamed t) = error "Let bindings should have a name."
-  rpl (Named x (Mvar y)) = Left (Mvar x , (Mvar y))
+  rpl (Named x (Mvar y)) = Left (Mvar x , Mvar y)
   rpl self@(Named x t) = Right self
   rpl (Recursive rs) = error "Let bindings cannot be recursive."
   
 removeLetsVar self@(Mswitch ta tb) = let nta = removeLetsVar ta
-                                         ntb = map removeLetsVar (map snd tb)
+                                         ntb = map (removeLetsVar . snd) tb
                                      in Mswitch nta (zipWith (\(c , _) nb -> (c , nb)) tb ntb)
 removeLetsVar self@(Mintop1 x y t) = let nt = removeLetsVar t
                                      in Mintop1 x y nt
@@ -352,8 +352,8 @@ optimizeLets r = r
 
 
 optimizeLetsB :: [Binding] -> [Binding]
-optimizeLetsB (Named id t : bs) = Named id (optimizeLets t) : (optimizeLetsB bs)
-optimizeLetsB (Recursive ys : bs) = Recursive (zip (map fst ys) (map (optimizeLets . snd) ys)) : (optimizeLetsB bs)
+optimizeLetsB (Named id t : bs) = Named id (optimizeLets t) : optimizeLetsB bs
+optimizeLetsB (Recursive ys : bs) = Recursive (zip (map fst ys) (map (optimizeLets . snd) ys)) : optimizeLetsB bs
 optimizeLetsB (_ : bs) = error "Unnamed binding?"
 optimizeLetsB [] = []
 

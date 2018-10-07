@@ -79,7 +79,7 @@ eraseB bs = case findMain allIds of
     g :: Binding -> [Binding] -> [Binding]
     g x osum = case x of
       Named id _t ->
-        case (M.lookup id allUM) of
+        case M.lookup id allUM of
           Just _ -> x : osum
           _ -> osum
       Recursive ys ->

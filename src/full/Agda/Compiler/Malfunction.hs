@@ -1,4 +1,3 @@
-{-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -Wall #-}
 module Agda.Compiler.Malfunction (backend) where
 
@@ -93,7 +92,7 @@ backend' = Backend' {
 mlfPreCompile :: MlfOptions -> TCM MlfOptions
 mlfPreCompile mlfOpts = do
   allowUnsolved <- optAllowUnsolved <$> pragmaOptions
-  when allowUnsolved $ genericError $ "Unsolved meta variables are not allowed when compiling."
+  when allowUnsolved $ genericError "Unsolved meta variables are not allowed when compiling."
   return mlfOpts
 
 
@@ -147,10 +146,10 @@ mlfMod
   -> TCM (Mod , (OCamlCode , IsMain))
 mlfMod allDefs = do
 -- TODO We need to use ocCode.
-  (rmDefs , ocCode) <- partitionEithers <$> catMaybes <$> (mapM handlePragmas allDefs)
+  (rmDefs , ocCode) <- partitionEithers . catMaybes <$> mapM handlePragmas allDefs
   env <- Mlf.mkCompilerEnv rmDefs
   (bs , im) <- Mlf.compile env rmDefs
-  pure $ (MMod bs [] , (concat ocCode , im))
+  pure (MMod bs [] , (concat ocCode , im))
   
 
 
@@ -166,7 +165,7 @@ outFile m = do
   let (fdir, fn) = let r = map (show . pretty) m
                    in (init r , last r)
   let dir = intercalate "/" (mdir : fdir)
-      fp  = dir ++ "/" ++ (replaceExtension fn "mlf")
+      fp  = dir ++ "/" ++ replaceExtension fn "mlf"
   liftIO $ createDirectoryIfMissing True dir
   return (mdir, dir , fp)
 
@@ -190,8 +189,9 @@ mlfCompile opts modIsMain mods = do
   let isMain = mappend modIsMain im -- both need to be IsMain
 
   
-  case (modIsMain /= isMain) of
-    True -> (genericError ("No main function defined in " ++ ((show . pretty) agdaMod) ++ " . Use --no-main to suppress this warning."))
+  case modIsMain /= isMain of
+    True -> genericError
+               ("No main function defined in " ++ (show . pretty) agdaMod ++ " . Use --no-main to suppress this warning.")
     False -> pure ()
 
   let op = case isMain of
@@ -223,7 +223,7 @@ compileToMLF :: [Definition] -> FilePath -> TCM (OCamlCode , IsMain)
 compileToMLF defs fp = do
   (modl , (ocCode , im)) <- mlfMod defs
   let modlTxt = prettyShow modl
-  liftIO $ (fp `writeFile` modlTxt)
+  liftIO (fp `writeFile` modlTxt)
   pure (ocCode , im) 
 
 
@@ -235,7 +235,7 @@ handlePragmas :: Definition -> TCM (Maybe (Either Definition OCamlCode))
 handlePragmas Defn{defArgInfo = info, defName = q} | isIrrelevant info = do
   reportSDoc "compile.ghc.definition" 10 $
            pure $ text "Not compiling" <+> (pretty q <> text ".")
-  pure $ Nothing
+  pure Nothing
 handlePragmas def@Defn{defName = q , theDef = d} = do
   reportSDoc "compile.ghc.definition" 10 $ pure $ vcat
     [ text "Compiling" <+> pretty q <> text ":"
@@ -260,8 +260,8 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
         when inline $ warning $ UselessInline q
         -- TODO At the moment we do not check that the type of the OCaml function corresponds to the
         -- type of the agda function or the postulate.
-        let code = "let " ++ (prettyShow $ Mlf.nameToIdent q) ++ " = \n" ++ oc
-        pure $ Just $ Right $ code
+        let code = "let " ++ prettyShow (Mlf.nameToIdent q) ++ " = \n" ++ oc
+        pure $ Just $ Right code
         
       -- Compiling Bool
       Datatype{} | Just q == mbool -> do
@@ -273,9 +273,9 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
         _ <- sequence_ [primTrue, primFalse] -- Just to get the proper error for missing TRUE/FALSE
         Just true  <- getBuiltinName builtinTrue
         Just false <- getBuiltinName builtinFalse
-        let ctr = "let " ++ (prettyShow $ Mlf.nameToIdent true) ++ " = true;;"
-        let cfl = "let " ++ (prettyShow $ Mlf.nameToIdent false) ++ " = false;;"
-        pure $ Just $ Right $ ("\n" ++ ctr ++ "\n" ++ cfl ++ "\n")
+        let ctr = "let " ++ prettyShow (Mlf.nameToIdent true) ++ " = true;;"
+        let cfl = "let " ++ prettyShow  (Mlf.nameToIdent false) ++ " = false;;"
+        pure $ Just $ Right ("\n" ++ ctr ++ "\n" ++ cfl ++ "\n")
 
 
       -- Compiling Inf
@@ -283,9 +283,9 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
 
       -- TODO We probably need to ignore all remaining axioms.
       -- They can only be OCType or unimplemented ones, postulates without a representation.
-      Axiom{} -> do
+      Axiom{} -> 
         case pragma of
-          Just (OCType _ _) -> pure $ Nothing
+          Just (OCType _ _) -> pure Nothing
           _ -> genericError "There are postulates that have not been defined."
 
       Primitive{} -> pure $ Just $ Left def
@@ -301,12 +301,12 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
 
 writeCodeToModule :: FilePath -> OCamlCode -> TCM ()
 writeCodeToModule dir ocCode = do
-  ifs <- map miInterface <$> Map.elems <$> getVisitedModules
-  fcs <- pure $ foldr (\i s-> let mfc = (Map.lookup "OCaml" . iForeignCode) i
-                               in case mfc of
-                                    Just c -> s ++ [c]
-                                    _ -> s ) [] ifs
-  liftIO $ ((dir ++ "/FC.ml") `writeFile` ((concat $ map someCode fcs) ++ "\n\n" ++ ocCode)) where
+  ifs <- map miInterface . Map.elems <$> getVisitedModules
+  let fcs = foldr (\i s-> let mfc = (Map.lookup "OCaml" . iForeignCode) i
+                          in case mfc of
+                               Just c -> s ++ [c]
+                               _ -> s ) [] ifs
+  liftIO ((dir ++ "/FC.ml") `writeFile` (concatMap someCode fcs ++ "\n\n" ++ ocCode)) where
     getCode (ForeignCode _ code)  = code
     someCode :: [ForeignCode] -> String
-    someCode fc = intercalate ("\n\n") $ reverse $ map getCode fc
+    someCode fc = intercalate "\n\n" $ reverse $ map getCode fc
