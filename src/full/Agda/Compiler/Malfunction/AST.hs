@@ -29,6 +29,7 @@ module Agda.Compiler.Malfunction.AST
   --  * Re-export the whole module
   , pretty
   , prettyShow
+  , topModNameToLIdent
   ) where
 
 import Prelude hiding ((<>))
@@ -39,6 +40,8 @@ import Data.Int
 import Agda.Utils.Pretty
 import Data.Data (Data, Typeable)
 import GHC.Exts (IsList(..), IsString(..))
+import Agda.Syntax.Concrete.Name (TopLevelModuleName (..))
+
 
 -- | The integer types.
 data IntType
@@ -175,10 +178,7 @@ deriving stock   instance Data     Longident
 deriving stock   instance Typeable Longident
 deriving newtype instance IsList   Longident
 
---data Longident
---  = Lident String
---  | Ldot   Longident String
---  | Lapply Longident Longident
+
 
 -- "The top-level sexp must begin with the atom module, followed by a
 -- list of bindings (described under let, below), followed by an sexp
@@ -221,25 +221,7 @@ deriving stock instance Ord       Term
 deriving stock instance Data     Term
 deriving stock instance Typeable Term
 
--- instance Uniplate Term where
---   uniplate = \case
---     Mvar i              -> plate Mvar     |- i
---     Mlambda is t0       -> plate Mlambda  |- is  |* t0
---     Mapply t ts         -> plate Mapply   |* t   ||* ts
---     Mlet bs t           -> plate Mlet     |- bs  |*  t
---     Mint c              -> plate Mint     |- c
---     Mstring s           -> plate Mstring  |- s
---     Mglobal i           -> plate Mglobal  |- i
---     Mswitch t xs        -> plate Mswitch  |* t   ||+ xs
---     Mintop1 op tp t     -> plate Mintop1  |- op  |- tp |* t
---     Mintop2 op tp t0 t1 -> plate Mintop2  |- op  |- tp |* t0 |* t1
---     Mconvert src trg t  -> plate Mconvert |- src |- trg |* t
---     Mvecnew tp t0 t1    -> plate Mvecnew  |- tp  |* t0 |* t1
---     Mvecget tp t0 t1    -> plate Mvecget  |- tp  |* t0 |* t1
---     Mvecset tp t0 t1 t2 -> plate Mvecset  |- tp  |* t0 |* t1 |* t2
---     Mveclen tp t0       -> plate Mveclen  |- tp  |* t0
---     Mblock n ts         -> plate Mblock   |- n   ||* ts
---     Mfield n t          -> plate Mfield   |- n   |* t
+
 
 -- | Bindings
 --
@@ -385,3 +367,9 @@ instance Pretty IntType where
     TInt32  -> "int32"
     TInt64  -> "int64"
     TBigint -> "bigint"
+
+
+topModNameToLIdent :: String -> TopLevelModuleName -> String -> Longident
+topModNameToLIdent fc t fn = Longident $ ((Ident fc) : (g $ moduleNameParts t)) where
+  g [] = [Ident fn]
+  g (x : xs) = Ident x : g xs

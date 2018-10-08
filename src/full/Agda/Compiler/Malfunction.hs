@@ -236,7 +236,7 @@ compileToMLF defs fp = do
 
 
 
-
+-- TODO Replace OcamlCode with a binding that use Mglobal
 handlePragmas :: Definition -> TCM (Maybe (Either (Either Definition [Binding]) (TopLevelModuleName , OCamlCode)))
 handlePragmas Defn{defArgInfo = info, defName = q} | isIrrelevant info = do
   reportSDoc "compile.ghc.definition" 10 $
@@ -253,21 +253,24 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
 --  mlist  <- getBuiltinName builtinList
   minf   <- getBuiltinName builtinInf
   mflat  <- getBuiltinName builtinFlat
+  mlevel <- getBuiltinName builtinLevel
+  
   case d of
       _ | Just OCDefn{} <- pragma, Just q == mflat ->
         genericError
           "\"COMPILE GHC\" pragmas are not allowed for the FLAT builtin."
 
       _ | Just (OCDefn r oc) <- pragma -> setCurrentRange r $ do
-            
         -- Check that the function isn't INLINE (since that will make this
         -- definition pointless).
         inline <- (^. funInline) . theDef <$> getConstInfo q
         when inline $ warning $ UselessInline q
         -- TODO At the moment we do not check that the type of the OCaml function corresponds to the
         -- type of the agda function or the postulate.
-        let code = "let " ++ prettyShow (Mlf.nameToIdent q) ++ " = \n" ++ oc
-        pure $ Just $ Right ((toTopLevelModuleName . qnameModule) q , code)
+        let ident = Mlf.nameToIdent q
+            mdn = (toTopLevelModuleName . qnameModule) q
+            longIdent = topModNameToLIdent "ForeignCode" mdn oc
+        pure $ Just $ Left $ Right $ [Named ident (Mglobal longIdent)]
         
       -- Compiling Bool
       Datatype{} | Just q == mbool -> do
@@ -288,12 +291,19 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
       -- Compiling Inf
       _ | Just q == minf -> genericError "Inf is not supported at the moment."
 
+
+-- Since Level is never pattern matched upon , we could simply compile it to ().
+-- Since , malfunction is typeless, we only need to define the constructors.
+-- primLevelZero , primLevelSuc and primLevelMax at Primitives.hs.
+      _ | Just q == mlevel -> pure Nothing
+
       -- TODO We probably need to ignore all remaining axioms.
       -- They can only be OCType or unimplemented ones, postulates without a representation.
       Axiom{} -> 
         case pragma of
           Just (OCType _ _) -> pure . error $ "OCType pragma " ++ prettyShow q
-          _ -> genericError "There are postulates that have not been defined."
+          Nothing -> genericError $ "There are postulates that have not been defined." ++ prettyShow q
+          _ -> pure $ error $ "IMPOSSIBLE"
 
       Primitive{} -> pure $ Just $ Left $ Left def
       Function{} -> pure $ Just $ Left $ Left def
@@ -318,7 +328,7 @@ writeCodeToModule dir ocCode = do
     getCode (ForeignCode _ code)  = code
     retCode :: [([String] , OCamlCode)] -> String
     retCode g = let mp = Map.fromList g
-                in byModName "" [] mp
+                in byModName False "" [] mp
                               
 
 
@@ -336,14 +346,14 @@ addTab :: String -> String -> String
 addTab tab str = tab ++ intercalate ("\n" ++ tab) (lines str)
 
 
-byModName :: String -> [String] -> Map [String] OCamlCode -> String
-byModName tab mn mp = let (here , more) = Map.partitionWithKey (\k _ -> length k == length mn) mp
-                          s = case splitToMod mn more of
-                                Nothing -> ""
-                                Just (lmn , (lmp , omp)) -> byModName (tab ++ "  ") lmn lmp ++ byModName tab mn omp
-                      in case mn of
-                           [] -> s
-                           _ -> let (fl : cm) = last mn
-                                in tab ++ "module " ++ (toUpper fl : cm) ++ " = struct\n"
-                                   ++ addTab tab ((concatMap snd . Map.toList) here) ++ "\n\n"
-                                   ++ s ++ "\n" ++ "end\n"
+byModName :: Bool -> String -> [String] -> Map [String] OCamlCode -> String
+byModName bl tab mn mp = let (here , more) = Map.partitionWithKey (\k _ -> length k == length mn) mp
+                             s = case splitToMod mn more of
+                                   Nothing -> ""
+                                   Just (lmn , (lmp , omp)) -> byModName True (tab ++ "  ") lmn lmp ++ byModName False tab mn omp
+                         in case bl of
+                              False -> s
+                              True -> let (fl : cm) = head mn
+                                      in tab ++ "module " ++ (toUpper fl : cm) ++ " = struct\n\n"
+                                         ++ addTab (tab ++ "  ") ((concatMap snd . Map.toList) here) ++ "\n"
+                                         ++ s ++ "\n" ++ tab ++ "end\n\n"

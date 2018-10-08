@@ -64,9 +64,9 @@ primitives =
   , "primNatLess"         |-> binOp Lt
 
   -- Level functions
-  , "primLevelZero"       |-> zeroT
+  , "primLevelZero"       |-> unitT
   , "primLevelSuc"        |-> sucT
---  , notMapped "primLevelMax"
+  , "primLevelMax"        |-> maxT
 
   -- Floating point functions
 --  , notMapped "primNatToFloat"
@@ -140,10 +140,12 @@ primitives =
 binOp :: BinaryIntOp -> Term
 binOp op = Mlambda ["a", "b"] (Mintop2 op TInt (Mvar "a") (Mvar "b"))
 
-zeroT :: Term
-zeroT = Mint (CInt 0)
+unitT :: Term
+unitT = Mglobal (Longident [(Ident "ForeignCode") , (Ident "unit")])
 sucT :: Term
-sucT = Mlambda ["a"] (Mintop2 Add TInt (Mvar "a") (Mint (CInt 1)))
+sucT = Mlambda ["a"] unitT
+maxT :: Term
+maxT = Mlambda ["a" , "b"] unitT
 
 
 primStringAppend :: Term

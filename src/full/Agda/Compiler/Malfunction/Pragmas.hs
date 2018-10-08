@@ -34,7 +34,7 @@ type OCamlCode = String
 
 
 
--- | GHC backend translation pragmas.
+-- | OCaml backend translation pragmas.
 data OCamlPragma
   = OCDefn Range OCamlCode
       --  ^ @COMPILE OCaml x = <code>@
@@ -114,7 +114,7 @@ parseOCamlPragma p = setCurrentRange p $
 
 getOCamlPragma :: QName -> TCM (Maybe OCamlPragma)
 getOCamlPragma q = do
-  pragma <- traverse parseOCamlPragma =<< getUniqueCompilerPragma ghcBackendName q
+  pragma <- traverse parseOCamlPragma =<< getUniqueCompilerPragma "OCaml" q
   def <- getConstInfo q
   setCurrentRange pragma $ pragma <$ sanityCheckPragma def pragma
 
