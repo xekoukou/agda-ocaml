@@ -37,7 +37,7 @@ module Agda.Compiler.Malfunction.Compiler
   , module Agda.Compiler.Malfunction.AST
   ) where
 
-import           Agda.Syntax.Common (NameId(..))
+import           Agda.Syntax.Common (NameId(..) , Delayed(..))
 import           Agda.Syntax.Literal
 import           Agda.Syntax.Treeless
 
@@ -642,9 +642,13 @@ handleFunction env Defn{defName = q ,  theDef = d} rmap =
   case Map.lookup q rmap of
     Nothing -> pure (rmap , Nothing)
     Just _ -> case d of
+      Function{funMutual = mrec , funDelayed = delayed} ->
+       do
+         case delayed of
 -- TODO Handle the case where it is delayed.
-      Function{funMutual = mrec} ->
-        case mrec of
+           Delayed -> (pure . error) $ "Delayed is set to True for function name :" ++ prettyShow q
+           NotDelayed -> pure ()
+         case mrec of
           Nothing -> do
             mt <- toTreeless q
             pure ( Map.delete q rmap , maybe Nothing (\t -> Just $ runTranslate (translateBinding q t) env) mt)
@@ -672,10 +676,8 @@ handleFunctions _ [] _ = pure []
 
 compile
   :: Env -> [Definition]
-  -> TCM ([Binding] , IsMain)
-compile env defs = do
-  bss <- handleFunctions env defs (Map.fromList $ map (\x -> (defName x , x)) defs)
-  let (im , bs) = eraseB bss
-  pure (optimizeLetsB bs , im)
+  -> TCM [Binding]
+compile env defs = handleFunctions env defs (Map.fromList $ map (\x -> (defName x , x)) defs)
+
 
 

@@ -12,6 +12,7 @@ import           Agda.TypeChecking.Primitive (getBuiltinName)
 import           Agda.TypeChecking.Monad.Builtin
 import           Agda.Utils.Lens
 import           Agda.TypeChecking.Warnings
+import           Agda.Syntax.Concrete.Name (TopLevelModuleName (..))
 
 
 
@@ -21,6 +22,7 @@ import           Control.Monad.Extra
 import           Control.Monad.Trans
 import           Data.Either
 import           Data.List
+import           Data.Char
 import           Data.Map                            (Map)
 import qualified Data.Map                            as Map
 import           Data.Maybe
@@ -32,6 +34,8 @@ import           System.Directory
 import           Agda.Compiler.Malfunction.AST
 import qualified Agda.Compiler.Malfunction.Compiler  as Mlf
 import           Agda.Compiler.Malfunction.Pragmas
+import           Agda.Compiler.Malfunction.Optimize
+import           Agda.Compiler.Malfunction.EraseDefs
 
 
 -- TODO Replace it with throwimpossible.
@@ -143,13 +147,15 @@ definitionSummary opts def = when (optDebugMLF opts) $ do
 -- | Compiles a whole module
 mlfMod
   :: [Definition]   -- ^ All visible definitions
-  -> TCM (Mod , (OCamlCode , IsMain))
+  -> TCM (Mod , ([(TopLevelModuleName , OCamlCode)] , IsMain))
 mlfMod allDefs = do
--- TODO We need to use ocCode.
-  (rmDefs , ocCode) <- partitionEithers . catMaybes <$> mapM handlePragmas allDefs
+  (eith , ocCode) <- partitionEithers . catMaybes <$> mapM handlePragmas allDefs
+  let (rmDefs, sbs) = partitionEithers eith
   env <- Mlf.mkCompilerEnv rmDefs
-  (bs , im) <- Mlf.compile env rmDefs
-  pure (MMod bs [] , (concat ocCode , im))
+  bss <- Mlf.compile env rmDefs
+  let (im , bs) = eraseB (concat sbs ++ bss)
+      rbs = optimizeLetsB bs
+  pure (MMod rbs [] , (ocCode , im))
   
 
 
@@ -219,7 +225,7 @@ mlfCompile opts modIsMain mods = do
 --       x0 = def0
 --       ...
 --    )
-compileToMLF :: [Definition] -> FilePath -> TCM (OCamlCode , IsMain)
+compileToMLF :: [Definition] -> FilePath -> TCM ([(TopLevelModuleName , OCamlCode)] , IsMain)
 compileToMLF defs fp = do
   (modl , (ocCode , im)) <- mlfMod defs
   let modlTxt = prettyShow modl
@@ -231,7 +237,7 @@ compileToMLF defs fp = do
 
 
 
-handlePragmas :: Definition -> TCM (Maybe (Either Definition OCamlCode))
+handlePragmas :: Definition -> TCM (Maybe (Either (Either Definition [Binding]) (TopLevelModuleName , OCamlCode)))
 handlePragmas Defn{defArgInfo = info, defName = q} | isIrrelevant info = do
   reportSDoc "compile.ghc.definition" 10 $
            pure $ text "Not compiling" <+> (pretty q <> text ".")
@@ -261,7 +267,7 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
         -- TODO At the moment we do not check that the type of the OCaml function corresponds to the
         -- type of the agda function or the postulate.
         let code = "let " ++ prettyShow (Mlf.nameToIdent q) ++ " = \n" ++ oc
-        pure $ Just $ Right code
+        pure $ Just $ Right ((toTopLevelModuleName . qnameModule) q , code)
         
       -- Compiling Bool
       Datatype{} | Just q == mbool -> do
@@ -273,9 +279,10 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
         _ <- sequence_ [primTrue, primFalse] -- Just to get the proper error for missing TRUE/FALSE
         Just true  <- getBuiltinName builtinTrue
         Just false <- getBuiltinName builtinFalse
-        let ctr = "let " ++ prettyShow (Mlf.nameToIdent true) ++ " = true;;"
-        let cfl = "let " ++ prettyShow  (Mlf.nameToIdent false) ++ " = false;;"
-        pure $ Just $ Right ("\n" ++ ctr ++ "\n" ++ cfl ++ "\n")
+        let ctr = Mlf.nameToIdent true
+        let cfl = Mlf.nameToIdent false
+        (pure . Just . Left . Right) $ Named ctr (Mglobal (Longident (Ident "ForeignCode" : Ident "trueC" : []))) :
+                                        Named cfl (Mglobal (Longident (Ident "ForeignCode" : Ident "falseC" : []))) : [] 
 
 
       -- Compiling Inf
@@ -285,11 +292,11 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
       -- They can only be OCType or unimplemented ones, postulates without a representation.
       Axiom{} -> 
         case pragma of
-          Just (OCType _ _) -> pure Nothing
+          Just (OCType _ _) -> pure . error $ "OCType pragma " ++ prettyShow q
           _ -> genericError "There are postulates that have not been defined."
 
-      Primitive{} -> pure $ Just $ Left def
-      Function{} -> pure $ Just $ Left def
+      Primitive{} -> pure $ Just $ Left $ Left def
+      Function{} -> pure $ Just $ Left $ Left def
       _ -> pure $ error "Unexpected case in HandlePragmas."
 
 
@@ -299,14 +306,44 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
 
 
 
-writeCodeToModule :: FilePath -> OCamlCode -> TCM ()
+writeCodeToModule :: FilePath -> [(TopLevelModuleName , OCamlCode)] -> TCM ()
 writeCodeToModule dir ocCode = do
+  let pcode = map (\(m , c) -> (moduleNameParts m , c)) ocCode
   ifs <- map miInterface . Map.elems <$> getVisitedModules
   let fcs = foldr (\i s-> let mfc = (Map.lookup "OCaml" . iForeignCode) i
                           in case mfc of
-                               Just c -> s ++ [c]
-                               _ -> s ) [] ifs
-  liftIO ((dir ++ "/FC.ml") `writeFile` (concatMap someCode fcs ++ "\n\n" ++ ocCode)) where
+                              Just c -> s ++ [((moduleNameParts . toTopLevelModuleName . iModuleName) i , intercalate "\n\n" $ reverse $ map getCode c)]
+                              _ -> s ) [] ifs
+  liftIO ((dir ++ "/ForeignCode.ml") `writeFile` retCode (fcs ++ pcode)) where
     getCode (ForeignCode _ code)  = code
-    someCode :: [ForeignCode] -> String
-    someCode fc = intercalate "\n\n" $ reverse $ map getCode fc
+    retCode :: [([String] , OCamlCode)] -> String
+    retCode g = let mp = Map.fromList g
+                in byModName "" [] mp
+                              
+
+
+
+splitToMod :: [String] -> Map [String] OCamlCode -> Maybe ([String] , (Map [String] OCamlCode , Map [String] OCamlCode))
+splitToMod mn mp = case Map.size mp of
+  0 -> Nothing
+  _ -> let len = length mn
+           s = fst (Map.elemAt 0 mp) !! len
+           nmn = s : mn
+       in Just (nmn , Map.partitionWithKey (\k _ -> k !! len == s) mp)
+
+
+addTab :: String -> String -> String
+addTab tab str = tab ++ intercalate ("\n" ++ tab) (lines str)
+
+
+byModName :: String -> [String] -> Map [String] OCamlCode -> String
+byModName tab mn mp = let (here , more) = Map.partitionWithKey (\k _ -> length k == length mn) mp
+                          s = case splitToMod mn more of
+                                Nothing -> ""
+                                Just (lmn , (lmp , omp)) -> byModName (tab ++ "  ") lmn lmp ++ byModName tab mn omp
+                      in case mn of
+                           [] -> s
+                           _ -> let (fl : cm) = last mn
+                                in tab ++ "module " ++ (toUpper fl : cm) ++ " = struct\n"
+                                   ++ addTab tab ((concatMap snd . Map.toList) here) ++ "\n\n"
+                                   ++ s ++ "\n" ++ "end\n"
