@@ -58,6 +58,7 @@ import           GHC.Exts (IsList(..))
 import           Agda.TypeChecking.Monad.Base
 import           Agda.TypeChecking.Monad
 import           Agda.Compiler.Common
+  
 import           Agda.Compiler.ToTreeless
 
 
@@ -66,6 +67,9 @@ import           Agda.Compiler.Malfunction.EraseDefs
 import           Agda.Compiler.Malfunction.Optimize
 import qualified Agda.Compiler.Malfunction.Primitive as Primitive
 
+
+--TODO Remove
+import Debug.Trace
 
 -- Contains information about constructors that are to be inlined. Some constructors cannot be inlined.
 data Env = Env
@@ -419,7 +423,7 @@ nameToTag nm = do
 
 
 isConstructor :: MonadReader Env m => QName -> m Bool
-isConstructor nm = (qnameNameId nm`Map.member`) <$> askConMap
+isConstructor nm = (qnameNameId nm `Map.member`) <$> askConMap
 
 askConMap :: MonadReader Env m => m (Map NameId ConRep)
 askConMap = asks _conMap
@@ -494,16 +498,6 @@ translateCon nm ts = do
 
 
 
--- | The argument are all data constructors grouped by datatype.
--- returns Maybe (false NameId, true NameId)
-findBuiltinBool :: [[QName]] -> Maybe (NameId, NameId)
-findBuiltinBool =  firstJust maybeBool
-  where maybeBool l@[_,_] = firstJust falseTrue (permutations l)
-          where falseTrue [f, t]
-                  | "Bool.false" `isSuffixOf` show f
-                  && "Bool.true" `isSuffixOf` show t = Just (qnameNameId f, qnameNameId t)
-                falseTrue _ = Nothing
-        maybeBool _ = Nothing
 
 askArity :: MonadReader Env m => QName -> m Int
 askArity = fmap _conArity . nontotalLookupConRep
@@ -638,7 +632,7 @@ namedBinding q t = (`Named`t) $ nameToIdent q
 -- The map is used to check if the definition has already been processed.
 -- This is due to recursive definitions.
 handleFunction :: Env -> Definition -> Map QName Definition -> TCM (Map QName Definition , Maybe Binding)
-handleFunction env Defn{defName = q ,  theDef = d} rmap = 
+handleFunction env Defn{defName = q ,  theDef = d} rmap = do
   case Map.lookup q rmap of
     Nothing -> pure (rmap , Nothing)
     Just _ -> case d of
@@ -649,7 +643,8 @@ handleFunction env Defn{defName = q ,  theDef = d} rmap =
            Delayed -> (pure . error) $ "Delayed is set to True for function name :" ++ prettyShow q
            NotDelayed -> pure ()
          case mrec of
-          Nothing -> do
+          Nothing -> pure $ error $ "the positivity checher has not determined mutual recursion yet."
+          Just [] ->  do
             mt <- toTreeless q
             pure ( Map.delete q rmap , maybe Nothing (\t -> Just $ runTranslate (translateBinding q t) env) mt)
           Just mq -> do

@@ -136,26 +136,18 @@ definitionSummary opts def = when (optDebugMLF opts) $ do
 
 
 
--- TODO: Maybe we'd like to refactor this so that we first do something like
--- this (in the calling function)
---
---    partition [Definition] -> ([Function], [Primitive], ...)
---
--- And then we can simply do the topologic sorting stuff on the functions only.
--- This would certainly make this funciton a helluva lot cleaner.
---
 -- | Compiles a whole module
 mlfMod
   :: [Definition]   -- ^ All visible definitions
-  -> TCM (Mod , ([(TopLevelModuleName , OCamlCode)] , IsMain))
+  -> TCM (Mod , IsMain)
 mlfMod allDefs = do
-  (eith , ocCode) <- partitionEithers . catMaybes <$> mapM handlePragmas allDefs
-  let (rmDefs, sbs) = partitionEithers eith
-  env <- Mlf.mkCompilerEnv rmDefs
-  bss <- Mlf.compile env rmDefs
+  (eith , sbs) <- partitionEithers . catMaybes <$> mapM handlePragmas allDefs
+  let (dts, fns) = partitionEithers eith
+  env <- Mlf.mkCompilerEnv dts
+  bss <- Mlf.compile env fns
   let (im , bs) = eraseB (concat sbs ++ bss)
       rbs = optimizeLetsB bs
-  pure (MMod rbs [] , (ocCode , im))
+  pure (MMod rbs [] , im)
   
 
 
@@ -190,8 +182,8 @@ mlfCompile opts modIsMain mods = do
 
   
   -- Perform the transformation to malfunction
-  (ocCode , im) <- compileToMLF allDefs fp
-  writeCodeToModule dir ocCode
+  im <- compileToMLF allDefs fp
+  writeCodeToModule dir
   let isMain = mappend modIsMain im -- both need to be IsMain
 
   
@@ -216,28 +208,20 @@ mlfCompile opts modIsMain mods = do
 
 
 
---
 
--- TODO: `Definition`'s should be sorted *and* grouped by `defMutual` (a field
--- in Definition). each group should compile to:
---
---    (rec
---       x0 = def0
---       ...
---    )
-compileToMLF :: [Definition] -> FilePath -> TCM ([(TopLevelModuleName , OCamlCode)] , IsMain)
+compileToMLF :: [Definition] -> FilePath -> TCM IsMain
 compileToMLF defs fp = do
-  (modl , (ocCode , im)) <- mlfMod defs
+  (modl , im) <- mlfMod defs
   let modlTxt = prettyShow modl
   liftIO (fp `writeFile` modlTxt)
-  pure (ocCode , im) 
+  pure im 
 
 
 
 
 
 -- TODO Replace OcamlCode with a binding that use Mglobal
-handlePragmas :: Definition -> TCM (Maybe (Either (Either Definition [Binding]) (TopLevelModuleName , OCamlCode)))
+handlePragmas :: Definition -> TCM (Maybe (Either (Either Definition Definition) [Binding]))
 handlePragmas Defn{defArgInfo = info, defName = q} | isIrrelevant info = do
   reportSDoc "compile.ghc.definition" 10 $
            pure $ text "Not compiling" <+> (pretty q <> text ".")
@@ -270,7 +254,7 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
         let ident = Mlf.nameToIdent q
             mdn = (toTopLevelModuleName . qnameModule) q
             longIdent = topModNameToLIdent "ForeignCode" mdn oc
-        pure $ Just $ Left $ Right $ [Named ident (Mglobal longIdent)]
+        pure $ Just $ Right $ [Named ident (Mglobal longIdent)]
         
       -- Compiling Bool
       Datatype{} | Just q == mbool -> do
@@ -284,8 +268,8 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
         Just false <- getBuiltinName builtinFalse
         let ctr = Mlf.nameToIdent true
         let cfl = Mlf.nameToIdent false
-        (pure . Just . Left . Right) $ Named ctr (Mglobal (Longident (Ident "ForeignCode" : Ident "trueC" : []))) :
-                                        Named cfl (Mglobal (Longident (Ident "ForeignCode" : Ident "falseC" : []))) : [] 
+        (pure . Just . Right) $ Named ctr (Mglobal (Longident (Ident "ForeignCode" : Ident "trueC" : []))) :
+                                Named cfl (Mglobal (Longident (Ident "ForeignCode" : Ident "falseC" : []))) : [] 
 
 
       -- Compiling Inf
@@ -302,12 +286,14 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
       Axiom{} -> 
         case pragma of
           Just (OCType _ _) -> pure . error $ "OCType pragma " ++ prettyShow q
-          Nothing -> genericError $ "There are postulates that have not been defined." ++ prettyShow q
+          Nothing -> genericError $ "Error : There are postulates that have not been defined : " ++ prettyShow q
           _ -> pure $ error $ "IMPOSSIBLE"
 
-      Primitive{} -> pure $ Just $ Left $ Left def
-      Function{} -> pure $ Just $ Left $ Left def
-      _ -> pure $ error "Unexpected case in HandlePragmas."
+      Datatype{} -> pure $ Just $ Left $ Left def
+      Record{} -> pure $ Just $ Left $ Left def
+      Primitive{} -> pure $ Just $ Left $ Right def
+      Function{} -> pure $ Just $ Left $ Right def
+      _ -> pure $ Nothing
 
 
 
@@ -316,15 +302,14 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
 
 
 
-writeCodeToModule :: FilePath -> [(TopLevelModuleName , OCamlCode)] -> TCM ()
-writeCodeToModule dir ocCode = do
-  let pcode = map (\(m , c) -> (moduleNameParts m , c)) ocCode
+writeCodeToModule :: FilePath -> TCM ()
+writeCodeToModule dir = do
   ifs <- map miInterface . Map.elems <$> getVisitedModules
   let fcs = foldr (\i s-> let mfc = (Map.lookup "OCaml" . iForeignCode) i
                           in case mfc of
                               Just c -> s ++ [((moduleNameParts . toTopLevelModuleName . iModuleName) i , intercalate "\n\n" $ reverse $ map getCode c)]
                               _ -> s ) [] ifs
-  liftIO ((dir ++ "/ForeignCode.ml") `writeFile` retCode (fcs ++ pcode)) where
+  liftIO ((dir ++ "/ForeignCode.ml") `writeFile` retCode fcs) where
     getCode (ForeignCode _ code)  = code
     retCode :: [([String] , OCamlCode)] -> String
     retCode g = let mp = Map.fromList g
