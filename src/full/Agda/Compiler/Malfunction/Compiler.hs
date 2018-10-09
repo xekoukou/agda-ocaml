@@ -42,7 +42,7 @@ import           Agda.Syntax.Literal
 import           Agda.Syntax.Treeless
 
 import           Control.Monad.Extra (ifM)
-import           Data.List.Extra (intercalate, firstJust, permutations, isSuffixOf)
+import           Data.List.Extra (intercalate)
 import           Control.Monad.Reader
 import           Data.Ix (inRange, rangeSize, range)
 import           Data.Map (Map)
@@ -57,14 +57,11 @@ import           GHC.Exts (IsList(..))
 
 import           Agda.TypeChecking.Monad.Base
 import           Agda.TypeChecking.Monad
-import           Agda.Compiler.Common
   
 import           Agda.Compiler.ToTreeless
 
 
 import           Agda.Compiler.Malfunction.AST
-import           Agda.Compiler.Malfunction.EraseDefs
-import           Agda.Compiler.Malfunction.Optimize
 import qualified Agda.Compiler.Malfunction.Primitive as Primitive
 
 
@@ -632,7 +629,7 @@ namedBinding q t = (`Named`t) $ nameToIdent q
 -- The map is used to check if the definition has already been processed.
 -- This is due to recursive definitions.
 handleFunction :: Env -> Definition -> Map QName Definition -> TCM (Map QName Definition , Maybe Binding)
-handleFunction env Defn{defName = q ,  theDef = d} rmap = do
+handleFunction env Defn{defName = q ,  theDef = d} rmap = 
   case Map.lookup q rmap of
     Nothing -> pure (rmap , Nothing)
     Just _ -> case d of

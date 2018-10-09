@@ -370,6 +370,5 @@ instance Pretty IntType where
 
 
 topModNameToLIdent :: String -> TopLevelModuleName -> String -> Longident
-topModNameToLIdent fc t fn = Longident $ ((Ident fc) : (g $ moduleNameParts t)) where
-  g [] = [Ident fn]
-  g (x : xs) = Ident x : g xs
+topModNameToLIdent fc t fn = Longident (Ident fc : g (moduleNameParts t)) where
+  g xs = foldr ((:) . Ident) [Ident fn] xs

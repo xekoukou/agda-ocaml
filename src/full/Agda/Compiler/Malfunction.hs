@@ -254,7 +254,7 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
         let ident = Mlf.nameToIdent q
             mdn = (toTopLevelModuleName . qnameModule) q
             longIdent = topModNameToLIdent "ForeignCode" mdn oc
-        pure $ Just $ Right $ [Named ident (Mglobal longIdent)]
+        pure $ Just $ Right [Named ident (Mglobal longIdent)]
         
       -- Compiling Bool
       Datatype{} | Just q == mbool -> do
@@ -287,13 +287,13 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
         case pragma of
           Just (OCType _ _) -> pure . error $ "OCType pragma " ++ prettyShow q
           Nothing -> genericError $ "Error : There are postulates that have not been defined : " ++ prettyShow q
-          _ -> pure $ error $ "IMPOSSIBLE"
+          _ -> pure $ error "IMPOSSIBLE"
 
       Datatype{} -> pure $ Just $ Left $ Left def
       Record{} -> pure $ Just $ Left $ Left def
       Primitive{} -> pure $ Just $ Left $ Right def
       Function{} -> pure $ Just $ Left $ Right def
-      _ -> pure $ Nothing
+      _ -> pure Nothing
 
 
 

@@ -141,7 +141,7 @@ binOp :: BinaryIntOp -> Term
 binOp op = Mlambda ["a", "b"] (Mintop2 op TInt (Mvar "a") (Mvar "b"))
 
 unitT :: Term
-unitT = Mglobal (Longident [(Ident "ForeignCode") , (Ident "unit")])
+unitT = Mglobal (Longident [Ident "ForeignCode" , Ident "unit"])
 sucT :: Term
 sucT = Mlambda ["a"] unitT
 maxT :: Term
