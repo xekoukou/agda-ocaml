@@ -38,13 +38,11 @@ type OCamlCode = String
 data OCamlPragma
   = OCDefn Range OCamlCode
       --  ^ @COMPILE OCaml x = <code>@
--- TODO We do not currently check the types of OCDefn
--- Instead you need to define the constructors of the values of a type with OCDefn.
-  | OCType Range OCamlType
-      --  ^ @COMPILE OCaml X = type <type>@
--- TODO Not supported.
---   | OCData Range OCamlType [OCamlCode]
---       -- ^ @COMPILE OCaml X = data D (c₁ | ... | cₙ)
+      -- Important : We do not check that types correspond to the pragma.
+      -- It could lead to undefined behaviors, crashes and all the other goodies.
+
+ -- TODO OCExport should simply define the name of a function that is exported to OCaml.
+ -- 'f' is the declaration that will be inserted at .mli .
 --   | OCExport Range OCamlCode
 --       -- ^ @COMPILE OCaml x as f@
   deriving (Show, Eq)
@@ -52,15 +50,11 @@ data OCamlPragma
 
 instance HasRange OCamlPragma where
   getRange (OCDefn   r _)   = r
-  getRange (OCType   r _)   = r
---   getRange (OCData   r _ _) = r
 --   getRange (OCExport r _) = r
 
 
 -- Syntax for OCaml pragmas:
 --  OCDefn CODE       "= CODE"
---  OCType TYPE       "= type TYPE"
---  OCData NAME CONS  "= data NAME (CON₁ | .. | CONₙ)"
 --  OCExport NAME     "as NAME"
 
 
@@ -72,7 +66,7 @@ parsePragma (CompilerPragma r s) =
     ps  -> Left $ "Ambiguous parse of pragma '" ++ s ++ "':\n" ++ unlines (map show ps)  -- shouldn't happen
   where
     pragmaP :: ReadP Char OCamlPragma
-    pragmaP = choice [ typeP , defnP ] -- choice [ exportP, typeP, dataP, defnP ]
+    pragmaP = choice [ defnP ] -- choice [ exportP, typeP, dataP, defnP ]
 
     whitespace = many1 (satisfy isSpace)
 
@@ -100,7 +94,6 @@ parsePragma (CompilerPragma r s) =
 --     exportP = OCExport r <$ wordsP ["as"]        <* whitespace <*> ocIdent <* skipSpaces
 --     dataP   = OCData   r <$ wordsP ["=", "data"] <* whitespace <*> ocIdent <*>
 --                                                     paren (sepBy (skipSpaces *> ocIdent) barP) <* skipSpaces
-    typeP   = OCType   r <$ wordsP ["=", "type"] <* whitespace <*> ocCode
     defnP = OCDefn r <$ wordsP ["="] <* whitespace <* notTypeOrData <*> ocCode
 
 
@@ -135,28 +128,3 @@ sanityCheckPragma def (Just OCDefn{}) =
         typeError $ GenericDocError $
           sep [ text $ "Bad COMPILE OCaml pragma for " ++ which ++ " type. Use"
               , text "{-# COMPILE OCaml <Name> = data <OCData> (<OCCon1> | .. | <OCConN>) #-}" ]
--- sanityCheckPragma def (Just OCData{}) =
---   case theDef def of
---     Datatype{} -> pure $ error $ show def -- return () -- TODO Fix this
---     Record{}   -> pure $ error $ show def -- return ()
---     _          -> typeError $ GenericError "OCaml data types can only be given for data or record types."
-sanityCheckPragma def (Just OCType{}) =
-  case theDef def of
-    Axiom{} -> return ()
-    Datatype{} -> do
-      -- We use OCType pragmas for Nat, Int and Bool
-      nat  <- getBuiltinName builtinNat
-      int  <- getBuiltinName builtinInteger
-      bool <- getBuiltinName builtinBool
-      error $ show def -- unless (Just (defName def) `elem` [nat, int, bool]) err -- TODO Fix this
-    _ -> err
-  where
-    err = typeError $ GenericError "OCaml types can only be given for postulates."
--- sanityCheckPragma def (Just OCExport{}) =
---   case theDef def of
---     Function{} -> return ()
---     _ -> typeError $ GenericError "Only functions can be exported to OCaml using {-# COMPILE OCaml <Name> as <OCName> #-}"
--- 
-
-
-

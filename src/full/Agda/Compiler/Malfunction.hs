@@ -232,17 +232,16 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
     , nest 2 $ text (show d)
     ]
   pragma <- getOCamlPragma q
-  mbool  <- getBuiltinName builtinBool
--- We do not need to use mlist. It seems that the haskell backend does that to increase performance.
---  mlist  <- getBuiltinName builtinList
   minf   <- getBuiltinName builtinInf
   mflat  <- getBuiltinName builtinFlat
   mlevel <- getBuiltinName builtinLevel
   
   case d of
+       -- TODO is this necessary? Probably yes.
       _ | Just OCDefn{} <- pragma, Just q == mflat ->
         genericError
-          "\"COMPILE GHC\" pragmas are not allowed for the FLAT builtin."
+          "\"COMPILE OCaml\" pragmas are not allowed for the FLAT builtin."
+
 
       _ | Just (OCDefn r oc) <- pragma -> setCurrentRange r $ do
         -- Check that the function isn't INLINE (since that will make this
@@ -256,38 +255,21 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
             longIdent = topModNameToLIdent "ForeignCode" mdn oc
         pure $ Just $ Right [Named ident (Mglobal longIdent)]
         
-      -- Compiling Bool
-      Datatype{} | Just q == mbool -> do
-       -- TODO It seems that the pragma Bool is not necessary for an untyped language.
-       -- only the constructors are important.
-       -- Of course, one could provide constructors for different data types for True and False
-       -- and we would not be able to provide a warning.
-                     
-        _ <- sequence_ [primTrue, primFalse] -- Just to get the proper error for missing TRUE/FALSE
-        Just true  <- getBuiltinName builtinTrue
-        Just false <- getBuiltinName builtinFalse
-        let ctr = Mlf.nameToIdent true
-        let cfl = Mlf.nameToIdent false
-        (pure . Just . Right) $ Named ctr (Mglobal (Longident (Ident "ForeignCode" : Ident "trueC" : []))) :
-                                Named cfl (Mglobal (Longident (Ident "ForeignCode" : Ident "falseC" : []))) : [] 
 
-
+      -- TODO is this necessary?
       -- Compiling Inf
       _ | Just q == minf -> genericError "Inf is not supported at the moment."
 
 
--- Since Level is never pattern matched upon , we could simply compile it to ().
--- Since , malfunction is typeless, we only need to define the constructors.
--- primLevelZero , primLevelSuc and primLevelMax at Primitives.hs.
+      -- Level is ignored . We compile it to Unit.
       _ | Just q == mlevel -> pure Nothing
 
-      -- TODO We probably need to ignore all remaining axioms.
-      -- They can only be OCType or unimplemented ones, postulates without a representation.
+
       Axiom{} -> 
         case pragma of
-          Just (OCType _ _) -> pure . error $ "OCType pragma " ++ prettyShow q
           Nothing -> genericError $ "Error : There are postulates that have not been defined : " ++ prettyShow q
           _ -> pure $ error "IMPOSSIBLE"
+
 
       Datatype{} -> pure $ Just $ Left $ Left def
       Record{} -> pure $ Just $ Left $ Left def

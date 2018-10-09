@@ -640,7 +640,7 @@ handleFunction env Defn{defName = q ,  theDef = d} rmap =
            Delayed -> (pure . error) $ "Delayed is set to True for function name :" ++ prettyShow q
            NotDelayed -> pure ()
          case mrec of
-          Nothing -> pure $ error $ "the positivity checher has not determined mutual recursion yet."
+          Nothing -> pure $ error "the positivity checher has not determined mutual recursion yet."
           Just [] ->  do
             mt <- toTreeless q
             pure ( Map.delete q rmap , maybe Nothing (\t -> Just $ runTranslate (translateBinding q t) env) mt)
