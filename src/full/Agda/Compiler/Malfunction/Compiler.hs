@@ -57,6 +57,7 @@ import           GHC.Exts (IsList(..))
 
 import           Agda.TypeChecking.Monad.Base
 import           Agda.TypeChecking.Monad
+import           Agda.TypeChecking.Positivity.Occurrence
   
 import           Agda.Compiler.ToTreeless
 
@@ -568,11 +569,16 @@ namedBinding :: QName -> Term -> Binding
 namedBinding q t = (`Named`t) $ nameToIdent q
 
 
+allUnused :: [Occurrence] -> Bool
+allUnused [] = True
+allUnused (Unused : ms) = allUnused ms
+allUnused (_ : _) = False
+
 
 -- The map is used to check if the definition has already been processed.
 -- This is due to recursive definitions.
 handleFunction :: Env -> Definition -> Map QName Definition -> TCM (Map QName Definition , Maybe Binding)
-handleFunction env def@(Defn{defName = q ,  theDef = d}) rmap = 
+handleFunction env def@(Defn{defName = q , defArgOccurrences = ocs , defNoCompilation = noC , theDef = d}) rmap = 
   case Map.lookup q rmap of
     Nothing -> pure (rmap , Nothing)
     Just _ -> case d of
@@ -582,21 +588,26 @@ handleFunction env def@(Defn{defName = q ,  theDef = d}) rmap =
 -- TODO Handle the case where it is delayed.
            Delayed -> error $ "Delayed is set to True for function name :" ++ prettyShow q
            NotDelayed -> pure ()
-         case mrec of
-          Nothing -> error $ "the positivity checher has not determined mutual recursion yet : " ++ prettyShow def
-          Just [] ->  do
-            mt <- toTreeless q
-            pure ( Map.delete q rmap , maybe Nothing (\t -> Just $ runTranslate (translateBinding q t) env) mt)
-          Just mq -> do
-            mts <- mapM (\x -> do
-                                 y <- toTreeless x
-                                 case y of
-                                   Just t -> pure $ Just (x , t)
-                                   Nothing -> pure Nothing ) mq
-            
-            pure ( foldr Map.delete rmap mq , Just $ runTranslate (translateMutualGroup (catMaybes mts)) env)
+      -- TODO Clean this if Agda's behavior changes.
+         case noC || allUnused ocs of
+           True -> pure ( Map.delete q rmap , Nothing)
+           _ ->
+             case mrec of
+              Nothing -> error $ "the positivity checher has not determined mutual recursion yet : " ++ prettyShow def ++ "Should I compile?" ++ prettyShow noC
+              Just [] ->  do
+                mt <- toTreeless q
+                pure ( Map.delete q rmap , maybe Nothing (\t -> Just $ runTranslate (translateBinding q t) env) mt)
+              Just mq -> do
+                mts <- mapM (\x -> do
+                                     y <- toTreeless x
+                                     case y of
+                                       Just t -> pure $ Just (x , t)
+                                       Nothing -> pure Nothing ) mq
+                
+                pure ( foldr Map.delete rmap mq , Just $ runTranslate (translateMutualGroup (catMaybes mts)) env)
       Primitive{primName = s} -> pure (Map.delete q rmap , compilePrim q s)
       _ -> pure $ error "At handleFunction : Case not expected."
+        
 
 
 
