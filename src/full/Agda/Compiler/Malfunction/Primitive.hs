@@ -3,6 +3,7 @@
 module Agda.Compiler.Malfunction.Primitive
   ( axioms
   , primitives
+  , unitT
   ) where
 
 import Data.Map (Map)
@@ -138,10 +139,12 @@ primitives =
 (|->) = (,)
 
 binOp :: BinaryIntOp -> Term
-binOp op = Mlambda ["a", "b"] (Mintop2 op TInt (Mvar "a") (Mvar "b"))
+binOp op = Mlambda ["a", "b"] (Mbiop op TInt (Mvar "a") (Mvar "b"))
+
 
 unitT :: Term
-unitT = Mglobal (Longident [Ident "ForeignCode" , Ident "unit"])
+unitT = Mint $ CInt 0
+
 sucT :: Term
 sucT = Mlambda ["a"] unitT
 maxT :: Term

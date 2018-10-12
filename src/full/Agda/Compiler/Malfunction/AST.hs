@@ -198,13 +198,14 @@ data Term
   | Mlambda [Ident] Term
   | Mapply Term [Term]
   | Mlet [Binding] Term
+  | Mseq [Term]
   | Mint IntConst
   | Mstring String
   | Mglobal Longident
   | Mswitch Term [([Case], Term)]
   -- Integers
-  | Mintop1 UnaryIntOp IntType Term
-  | Mintop2 BinaryIntOp IntType Term Term
+  | Muiop UnaryIntOp IntType Term
+  | Mbiop BinaryIntOp IntType Term Term
   | Mconvert IntType IntType Term
   -- Vectors
   | Mvecnew VectorType Term Term
@@ -280,13 +281,14 @@ instance Pretty Term where
     Mlambda is t        -> level ("lambda" <+> parens (hsep (map pretty is))) (pretty t)
     Mapply t ts         -> levelPlus ("apply " <> pretty t) (map pretty ts)
     Mlet bs t           -> level "let" (prettyList__ bs $$ pretty t)
+    Mseq ts             -> level "seq" (prettyList__ ts)
     Mint ic             -> pretty ic
     Mstring s           -> textShow s
     Mglobal li          -> parens $ "global" <+> prettyLongident li
     Mswitch t cexps     -> levelPlus ("switch" <+> pretty t) (map prettyCaseExpression cexps)
     -- Integers
-    Mintop1 op tp t0    -> pretty op <+> prettyTypedTerm tp t0
-    Mintop2 op tp t0 t1 -> levelPlus (pretty op) [prettyTypedTerm tp t0, prettyTypedTerm tp t1]
+    Muiop op tp t0    -> pretty op <+> prettyTypedTerm tp t0
+    Mbiop op tp t0 t1 -> levelPlus (pretty op) [prettyTypedTerm tp t0, prettyTypedTerm tp t1]
     Mconvert tp0 tp1 t0 -> parens $ "convert" <.> pretty tp0 <.> pretty tp1 <+> pretty t0
     -- Vectors
     Mvecnew _tp t0 t1    -> levelPlus "makevec" [pretty t0, pretty t1]

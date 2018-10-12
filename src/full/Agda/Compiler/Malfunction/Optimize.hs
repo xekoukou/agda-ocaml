@@ -31,12 +31,12 @@ replaceTr rt ar self@(Mswitch ta tb) =  caseEq rt ar self $
                                           let nta = replaceTr rt ar ta
                                               ntb = map (replaceTr rt ar . snd) tb
                                           in Mswitch nta (zipWith (\(c , _) nb -> (c , nb)) tb ntb)
-replaceTr rt ar self@(Mintop1 x y t) =  caseEq rt ar self $ let nt = replaceTr rt ar t
-                                    in Mintop1 x y nt
-replaceTr rt ar self@(Mintop2 x y ta tb ) =  caseEq rt ar self $
+replaceTr rt ar self@(Muiop x y t) =  caseEq rt ar self $ let nt = replaceTr rt ar t
+                                                          in Muiop x y nt
+replaceTr rt ar self@(Mbiop x y ta tb ) =  caseEq rt ar self $
                                                let nta = replaceTr rt ar ta
                                                    ntb = replaceTr rt ar tb
-                                               in Mintop2 x y nta ntb
+                                               in Mbiop x y nta ntb
 replaceTr rt ar self@(Mconvert x y t) =  caseEq rt ar self $
                                            let nt = replaceTr rt ar t
                                            in Mconvert x y nt
@@ -92,11 +92,11 @@ removeLets self@(Mlet bs t) =  let mt = replaceTrL (map rpl bs) t
 removeLets self@(Mswitch ta tb) = let nta = removeLets ta
                                       ntb = map (removeLets . snd) tb
                                   in Mswitch nta (zipWith (\(c , _) nb -> (c , nb)) tb ntb)
-removeLets self@(Mintop1 x y t) = let nt = removeLets t
-                                  in Mintop1 x y nt
-removeLets self@(Mintop2 x y ta tb ) = let nta = removeLets ta
-                                           ntb = removeLets tb
-                                       in Mintop2 x y nta ntb
+removeLets self@(Muiop x y t) = let nt = removeLets t
+                                in Muiop x y nt
+removeLets self@(Mbiop x y ta tb ) = let nta = removeLets ta
+                                         ntb = removeLets tb
+                                     in Mbiop x y nta ntb
 removeLets self@(Mconvert x y t) = let nt = removeLets t
                                    in Mconvert x y nt
 removeLets self@(Mvecnew x ta tb) = let nta = removeLets ta
@@ -218,15 +218,15 @@ findCF self@(Mswitch ta tb) =  do
                                  [] -> (\(_ , (_ , t , _)) -> t) (last rs)
                                  _ -> Mlet bs ((\(_ , (_ , t , _)) -> t) (last rs)))
 
-findCF  self@(Mintop1 x y t) = do (tms , nself) <- findCF  t
-                                  pure (tms , Mintop1 x y nself)
-findCF  self@(Mintop2 x y ta tb ) = do (tmsa , nta) <- findCF  ta
-                                       (tmsb , ntb) <- findCF  tb
-                                       let inters = M.intersection tmsa tmsb
-                                           newInters = M.map (\(a , b , c) -> (a , b , True)) inters
-                                           all = M.union tmsa tmsb
-                                           nall = newInters `M.union` all
-                                       pure (nall , Mintop2 x y nta ntb)
+findCF  self@(Muiop x y t) = do (tms , nself) <- findCF  t
+                                pure (tms , Muiop x y nself)
+findCF  self@(Mbiop x y ta tb ) = do (tmsa , nta) <- findCF  ta
+                                     (tmsb , ntb) <- findCF  tb
+                                     let inters = M.intersection tmsa tmsb
+                                         newInters = M.map (\(a , b , c) -> (a , b , True)) inters
+                                         all = M.union tmsa tmsb
+                                         nall = newInters `M.union` all
+                                     pure (nall , Mbiop x y nta ntb)
 findCF  self@(Mconvert x y t) = do (tms , nself) <- findCF  t
                                    pure (tms , Mconvert x y nself)
 findCF  self@(Mvecnew x ta tb) =  do (tmsa , nta) <- findCF  ta
@@ -312,11 +312,11 @@ removeLetsVar self@(Mlet bs t) = let (trm , tkp) = partitionEithers (map rpl bs)
 removeLetsVar self@(Mswitch ta tb) = let nta = removeLetsVar ta
                                          ntb = map (removeLetsVar . snd) tb
                                      in Mswitch nta (zipWith (\(c , _) nb -> (c , nb)) tb ntb)
-removeLetsVar self@(Mintop1 x y t) = let nt = removeLetsVar t
-                                     in Mintop1 x y nt
-removeLetsVar self@(Mintop2 x y ta tb ) = let nta = removeLetsVar ta
-                                              ntb = removeLetsVar tb
-                                          in Mintop2 x y nta ntb
+removeLetsVar self@(Muiop x y t) = let nt = removeLetsVar t
+                                   in Muiop x y nt
+removeLetsVar self@(Mbiop x y ta tb ) = let nta = removeLetsVar ta
+                                            ntb = removeLetsVar tb
+                                        in Mbiop x y nta ntb
 removeLetsVar self@(Mconvert x y t) = let nt = removeLetsVar t
                                       in Mconvert x y nt
 removeLetsVar self@(Mvecnew x ta tb) = let nta = removeLetsVar ta

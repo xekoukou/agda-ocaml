@@ -44,7 +44,7 @@ import           Agda.Syntax.Treeless
 import           Control.Monad.Extra (ifM)
 import           Data.List.Extra (intercalate)
 import           Control.Monad.Reader
-import           Data.Ix (inRange, rangeSize, range)
+import           Data.Ix (inRange, rangeSize)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Maybe (mapMaybe , fromMaybe , maybeToList , catMaybes)
@@ -70,16 +70,20 @@ import Debug.Trace
 
 -- Contains information about constructors that are to be inlined. Some constructors cannot be inlined.
 data Env = Env
-  { _conMap :: Map NameId ConRep
-  , _level :: Int
+  { conMap :: Map NameId ConRep
+  , level :: Int
   }
   deriving (Show)
 
 -- | Data needed to represent a constructor
-data ConRep = ConRep
-  { _conTag   :: Int
-  , _conArity :: Int
-  } deriving (Show)
+data ConRep =
+    BlockRep
+  { conTag    :: Int
+  , conArity' :: Int
+  }
+  | IntRep
+    { conTag :: Int }
+            deriving (Show)
 
 type Translate a = Reader Env a
 type Arity = Int
@@ -159,15 +163,21 @@ arityQName q = f . theDef <$> getConstInfo q
 
 mkCompilerEnv' :: [[(QName, Arity)]] -> Env
 mkCompilerEnv' consByDtype = Env {
-  _conMap = conMap
-  , _level = 0
+  conMap = conMap
+  , level = 0
   }
   where
-    conMap = Map.fromList [ (qnameNameId qn, ConRep {..} )
-                          | typeCons <- consByDtype
-                           , (length consByDtype <= rangeSize mlfTagRange)
-                             || error "too many constructors"
-                           , (_conTag, (qn, _conArity)) <- zip (range mlfTagRange) typeCons ]
+    singleDt :: Int -> Int -> [(QName , Arity)] -> [(NameId , ConRep)]
+    singleDt ci vi ((q , 0) : ms) = (qnameNameId q , IntRep {conTag = ci}) : singleDt (ci + 1) vi ms
+    singleDt ci vi ((q , a) : ms) = (qnameNameId q , BlockRep {conTag = vi , conArity' = a}) : singleDt ci (vi + 1) ms
+    singleDt _ _ [] = []
+    
+    conMap = Map.fromList (concatMap (singleDt 0 0) consByDtype)
+--     conMap = Map.fromList [ (qnameNameId qn, ConRep {..} )
+--                           | typeCons <- consByDtype
+--                            , (length consByDtype <= rangeSize mlfTagRange)
+--                              || error "too many constructors"
+--                            , (_conTag, (qn, _conArity)) <- zip (range mlfTagRange) typeCons ]
 
 
 mkCompilerEnv :: [Definition] -> TCM Env
@@ -196,33 +206,33 @@ translateM = translateTerm
 translateTerm :: MonadReader Env m => TTerm -> m Term
 translateTerm = \case
   TVar i            -> indexToVarTerm i
-  TPrim tp          -> return $ translatePrimApp tp []
+  TPrim tp          -> return $ translatePrim tp
   TDef name         -> pure $ translateName name
   TApp t0 args      -> translateApp t0 args
   tt@TLam{}         -> translateLam tt
   TLit lit          -> return $ translateLit lit
-  TCon nm           -> translateCon nm []
+  TCon nm           -> translateCon nm
   TLet t0 t1        -> do
     t0' <- translateTerm t0
     (var, t1') <- introVar (translateTerm t1)
     return (Mlet [Named var t0'] t1')
   -- @deflt@ is the default value if all @alt@s fail.
   -- TODO Handle the case where this is a lazy match if possible.
-  TCase i _ deflt alts -> do
-    t <- indexToVarTerm i
-    alts' <- alternatives t
-    return $ Mswitch t alts'
+  TCase i cinfo deflt alts -> do
+    case (caseLazy cinfo) of
+      True -> error "caseLazy error."
+      False -> do
+        t <- indexToVarTerm i
+        alts' <- alternatives t
+        return $ Mswitch t alts'
     where
-      -- Case expressions may not have an alternative, this is encoded
-      -- by @deflt@ being TError TUnreachable.
-      alternatives t = case deflt of
-        TError TUnreachable -> translateAltsChain t Nothing alts
-        _ -> do
+      alternatives t = do
           d <- translateTerm deflt
-          translateAltsChain t (Just d) alts
-  TUnit             -> return unitT
-  TSort             -> return unitT
-  TErased           -> return unitT -- TODO: We can probably erase these , but we would have to change 
+          translateAltsChain t d alts
+  TUnit             -> return Primitive.unitT
+  TSort             -> return Primitive.unitT
+  TErased           -> return Primitive.unitT
+                                    -- TODO: We can probably erase these , but we would have to change 
                                     -- the functions that use them , reduce their arity.
                                     -- For now, we simply pass the unit type.
   TError TUnreachable -> return wildcardTerm
@@ -235,29 +245,14 @@ wildcardTerm = errorT "__UNREACHABLE__"
 
 indexToVarTerm :: MonadReader Env m => Int -> m Term
 indexToVarTerm i = do
-  ni <- asks _level
+  ni <- asks level
   return (Mvar (ident (ni - i - 1)))
 
--- translateSwitch :: MonadReader m => Term -> TAlt -> m ([Case], Term)
--- translateSwitch tcase alt = case alt of
--- --  TAGuard c t -> liftM2 (,) (pure <$> translateCase c) (translateTerm t)
---   TALit pat body -> do
---     b <- translateTerm body
---     let c = pure $ litToCase pat
---     return (c, b)
---   TACon con arity t -> do
---     tg <- nameToTag con
---     usedFields <- snd <$> introVars arity
---       (Set.map (\ix -> arity - ix - 1) . Set.filter (<arity) <$> usedVars t)
---     (vars, t') <- introVars arity (translateTerm t)
---     let bt = bindFields vars usedFields tcase t'
---           -- TODO: It is not clear how to deal with bindings in a pattern
---     return (pure tg, bt)
---   TAGuard gd rhs -> return ([], Mvar "TAGuard.undefined")
 
-translateAltsChain :: MonadReader Env m => Term -> Maybe Term -> [TAlt] -> m [([Case], Term)]
-translateAltsChain _tcase defaultt []
-  = return $ maybe [] (\d -> [(defaultCase, d)]) defaultt
+-- TODO Review this code.
+translateAltsChain :: MonadReader Env m => Term -> Term -> [TAlt] -> m [([Case], Term)]
+translateAltsChain _ defaultt []
+  = pure [(defaultCase, defaultt)]
 translateAltsChain tcase defaultt (ta:tas) =
   case ta of
     TALit pat body -> do
@@ -265,13 +260,17 @@ translateAltsChain tcase defaultt (ta:tas) =
       let c = litToCase pat
       (([c], b):) <$> go
     TACon con arity t -> do
-      tg <- nameToTag con
       usedFields <- snd <$> introVars arity
-        (Set.map (\ix -> arity - ix - 1) . Set.filter (<arity) <$> usedVars t)
+         (Set.map (\ix -> arity - ix - 1) . Set.filter (<arity) <$> usedVars t)
       (vars, t') <- introVars arity (translateTerm t)
       let bt = bindFields vars usedFields tcase t'
       -- TODO: It is not clear how to deal with bindings in a pattern
-      (([tg], bt):) <$> go
+      
+      cnr <- askConRep con
+      let cs = case cnr of
+                 BlockRep{conTag = tg} -> Tag tg
+                 IntRep{conTag = tg} -> CaseInt tg
+      (([cs], bt):) <$> go
     TAGuard grd t -> do
       tgrd <- translateTerm grd
       t' <- translateTerm t
@@ -302,7 +301,10 @@ litToCase l = case l of
   LitNat _ i -> CaseInt . fromInteger $ i
   _          -> error "Unimplemented"
 
--- The argument is the lambda itself and not its body.
+
+
+
+-- The argument is the lambda itself together with its body.
 translateLam :: MonadReader Env m => TTerm -> m Term
 translateLam lam = do
   (is, t) <- translateLams lam
@@ -316,6 +318,8 @@ translateLam lam = do
       e' <- translateTerm e
       return ([], e')
 
+
+
 introVars :: MonadReader Env m => Int -> m a -> m ([Ident], a)
 introVars k ma = do
   (names, env') <- nextIdxs k
@@ -324,25 +328,21 @@ introVars k ma = do
   where
     nextIdxs :: MonadReader Env m => Int -> m ([Ident], Env)
     nextIdxs k' = do
-      i0 <- asks _level
+      i0 <- asks level
       e <- ask
-      return (map ident $ reverse [i0..i0 + k' - 1], e{_level = _level e + k'})
+      return (map ident $ reverse [i0..i0 + k' - 1], e{level = level e + k'})
 
 introVar :: MonadReader Env m => m a -> m (Ident, a)
 introVar ma = first head <$> introVars 1 ma
 
--- This is really ugly, but I've done this for the reason mentioned
--- in `translatePrim'`. Note that a similiar "optimization" could be
--- done for chained lambda-expressions:
---   TLam (TLam ...)
+
+
 translateApp :: MonadReader Env m => TTerm -> [TTerm] -> m Term
-translateApp ft xst = case ft of
-  TPrim p -> translatePrimApp p <$> mapM translateTerm xst
-  TCon nm -> translateCon nm xst
-  _       -> do
+translateApp ft xst =
+  do
     f <- translateTerm ft
     xs <- mapM translateTerm xst
-    return $ Mapply f xs
+    pure $ Mapply f xs
 
 ident :: Int -> Ident
 ident i = Ident $ "v" ++ show i
@@ -351,26 +351,28 @@ translateLit :: Literal -> Term
 translateLit l = case l of
   LitNat _ x -> Mint (CBigint x)
   LitString _ s -> Mstring s
+  -- TODO Check that this is correct. According to the OCaml spec,
+  -- Chars are represented as Ints.
   LitChar _ c -> Mint . CInt . fromEnum $ c
   _ -> error "unsupported literal type"
 
-translatePrimApp :: TPrim -> [Term] -> Term
-translatePrimApp tp args =
+translatePrim :: TPrim -> Term
+translatePrim tp =
   case tp of
-    PAdd -> intbinop Add
-    PSub -> intbinop Sub
-    PMul -> intbinop Mul
-    PQuot -> intbinop Div
-    PRem -> intbinop Mod
-    PGeq -> intbinop Gte
-    PLt -> intbinop Lt
-    PEqI -> intbinop Eq
+    PAdd -> intbinop TBigint Add
+    PSub -> intbinop TBigint Sub
+    PMul -> intbinop TBigint Mul
+    PQuot -> intbinop TBigint Div
+    PRem -> intbinop TBigint Mod
+    PGeq -> intbinop TBigint Gte
+    PLt -> intbinop TBigint Lt
+    PEqI -> intbinop TBigint Eq
     PEqF -> wrong
     PEqS -> wrong
-    PEqC -> intbinop Eq
+    PEqC -> wrong
     PEqQ -> wrong
     PIf -> wrong
-    PSeq -> pseq
+    PSeq -> Mlambda ["a" , "b"] $ Mseq [ (Mvar "a") , (Mvar "b") ]
 -- OCaml does not support unsigned Integers.
     PAdd64 -> notSupported
     PSub64 -> notSupported
@@ -382,62 +384,36 @@ translatePrimApp tp args =
     PITo64 -> notSupported
     P64ToI -> notSupported
   where
-    aType = TInt
-    intbinop op = case args of
-      [a, b] -> Mintop2 op aType a b
-      [a] -> Mlambda ["b"] $ Mintop2 op aType a (Mvar "b")
-      [] -> Mlambda ["a", "b"] $ Mintop2 op aType (Mvar "a") (Mvar "b")
-      _ -> wrongargs
-    -- NOTE: pseq is simply (\a b -> b) because malfunction is a strict language
-    -- TODO : Use seq from the malfunction spec.
-    pseq      = case args of
-      [_, b] -> b
-      [_] -> Mlambda ["b"] $ Mvar "b"
-      [] -> Mlambda ["a", "b"] $ Mvar "b"
-      _ -> wrongargs
-    -- TODO: Stub!
-    -- wrong = return $ errorT $ "stub : " ++ show tp
+    intbinop typ op = Mlambda ["a" , "b"] $ Mbiop op typ (Mvar "a") (Mvar "b")
+    
     -- TODO The RedBlack.agda test gave 3 args in pseq where the last one was unreachable.
-    wrongargs = errorT $ "unexpected number of arguments : " ++ prettyShow args ++ " Report this error."
     notSupported = error "Not supported by the OCaml backend."
     wrong = undefined
 
 
--- FIXME: Please not the multitude of interpreting QName in the following
--- section. This may be a problem.
--- This is due to the fact that QName can refer to constructors and regular
--- bindings, I think we want to handle these two cases separately.
 
--- Questionable implementation:
-nameToTag :: MonadReader Env m => QName -> m Case
-nameToTag nm = do
-  e <- ask
-  ifM (isConstructor nm)
-   (Tag <$> askConTag nm)
-   (error $ "nameToTag only implemented for constructors, qname=" ++ show nm
-    ++ "\nenv:" ++ show e)
- -- (return . Tag . fromEnum . nameId . qnameName $ nm)
+
 
 
 isConstructor :: MonadReader Env m => QName -> m Bool
 isConstructor nm = (qnameNameId nm `Map.member`) <$> askConMap
 
 askConMap :: MonadReader Env m => m (Map NameId ConRep)
-askConMap = asks _conMap
+askConMap = asks conMap
 
 -- |
 -- Set of indices of the variables that are referenced inside the term.
 --
 -- Example
--- λλ Env{_level = 2} usedVars (λ(λ ((Var 3) (λ (Var 4)))) ) == {1}
+-- λλ Env{level = 2} usedVars (λ(λ ((Var 3) (λ (Var 4)))) ) == {1}
 usedVars :: MonadReader Env m => TTerm -> m (Set Int)
-usedVars term = asks _level >>= go mempty
+usedVars term = asks level >>= go mempty
    where
      go vars0 topnext = goterm vars0 term
        where
          goterms = foldM (\acvars tt -> goterm acvars tt)
          goterm vars t = do
-           nextix <- asks _level
+           nextix <- asks level
            case t of
              (TVar v) -> return $ govar vars v nextix
              (TApp t0 args) -> goterms vars (t0:args)
@@ -459,62 +435,29 @@ usedVars term = asks _level >>= go mempty
            TALit{} -> return vars
 
 
--- TODO: Translate constructors differently from names.
--- Don't know if we should do the same when translating TDef's, but here we
--- should most likely use malfunction "blocks" to represent constructors
--- in an "untyped but injective way". That is, we only care that each
--- constructor maps to a unique number such that we will be able to
--- distinguish it in malfunction. This also means that we should carry
--- some state around mapping each constructor to it's corresponding
--- "block-representation".
---
--- An example for clarity. Consider type:
---
---   T a b = L a | R b | B a b | E
---
--- We need to encode the constructors in an injective way and we need to
--- encode the arity of the constructors as well.
---
---   translate (L a)   = (block (tag 2) (tag 0) a')
---   translate (R b)   = (block (tag 2) (tag 1) b')
---   translate (B a b) = (block (tag 3) (tag 2) a' b')
---   translate E       = (block (tag 1) (tag 3))
--- TODO: If the length of `ts` does not match the arity of `nm` then a lambda-expression must be returned.
-translateCon :: MonadReader Env m => QName -> [TTerm] -> m Term
-translateCon nm ts = do
-      ts' <- mapM translateTerm ts
-      tag <- askConTag nm
-      arity <- askArity nm
-      let diff = arity - length ts'
-          vs   = take diff $ map (Ident . pure) ['a'..]
-      return $ if diff == 0
-      then Mblock tag ts'
-      else case vs of
-             [] -> error "lambdas should not have zero arguments."
-             _ -> Mlambda vs (Mblock tag (ts' ++ map Mvar vs))
+
+
+translateCon :: MonadReader Env m => QName -> m Term
+translateCon nm = do
+      cnr <- askConRep nm
+      case cnr of
+        BlockRep{conTag = tag , conArity' = arity} -> do
+          let vs = take arity $ map (Ident . pure) ['a'..]
+          pure $ Mlambda vs (Mblock tag (map Mvar vs))
+        IntRep{conTag = tag} -> pure $  Mint $ CInt tag
 
 
 
 
-askArity :: MonadReader Env m => QName -> m Int
-askArity = fmap _conArity . nontotalLookupConRep
-
-askConTag :: MonadReader Env m => QName -> m Int
-askConTag = fmap _conTag . nontotalLookupConRep
-
-nontotalLookupConRep :: MonadReader Env f => QName -> f ConRep
-nontotalLookupConRep q = fromMaybe err <$> lookupConRep q
+askConRep :: MonadReader Env f => QName -> f ConRep
+askConRep q = fromMaybe err <$> lookupConRep q
   where
     err = error $ "Could not find constructor with qname: " ++ show q
 
 lookupConRep :: MonadReader Env f => QName -> f (Maybe ConRep)
-lookupConRep ns = Map.lookup (qnameNameId ns) <$> asks _conMap
+lookupConRep ns = Map.lookup (qnameNameId ns) <$> asks conMap
 
--- Unit is treated as a glorified value in Treeless, luckily it's fairly
--- straight-forward to encode using the scheme described in the documentation
--- for `translateCon`.
-unitT :: Term
-unitT = Mblock 0 []
+
 
 translateName :: QName -> Term
 translateName qn = Mvar $ nameToIdent qn
@@ -629,7 +572,7 @@ namedBinding q t = (`Named`t) $ nameToIdent q
 -- The map is used to check if the definition has already been processed.
 -- This is due to recursive definitions.
 handleFunction :: Env -> Definition -> Map QName Definition -> TCM (Map QName Definition , Maybe Binding)
-handleFunction env Defn{defName = q ,  theDef = d} rmap = 
+handleFunction env def@(Defn{defName = q ,  theDef = d}) rmap = 
   case Map.lookup q rmap of
     Nothing -> pure (rmap , Nothing)
     Just _ -> case d of
@@ -637,10 +580,10 @@ handleFunction env Defn{defName = q ,  theDef = d} rmap =
        do
          case delayed of
 -- TODO Handle the case where it is delayed.
-           Delayed -> (pure . error) $ "Delayed is set to True for function name :" ++ prettyShow q
+           Delayed -> error $ "Delayed is set to True for function name :" ++ prettyShow q
            NotDelayed -> pure ()
          case mrec of
-          Nothing -> pure $ error "the positivity checher has not determined mutual recursion yet."
+          Nothing -> error $ "the positivity checher has not determined mutual recursion yet : " ++ prettyShow def
           Just [] ->  do
             mt <- toTreeless q
             pure ( Map.delete q rmap , maybe Nothing (\t -> Just $ runTranslate (translateBinding q t) env) mt)

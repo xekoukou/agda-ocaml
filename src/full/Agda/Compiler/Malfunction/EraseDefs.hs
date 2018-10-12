@@ -46,12 +46,13 @@ findUsedIdents = foldMap step . Uniplate.universe
     Mlambda is _       -> is
     Mapply{}           -> mempty
     Mlet{}             -> mempty
+    Mseq{}             -> mempty
     Mint{}             -> mempty
     Mstring{}          -> mempty
     Mglobal{}          -> mempty
     Mswitch{}          -> mempty
-    Mintop1{}          -> mempty
-    Mintop2{}          -> mempty
+    Muiop{}            -> mempty
+    Mbiop{}            -> mempty
     Mconvert{}         -> mempty
     Mvecnew{}          -> mempty
     Mvecget{}          -> mempty

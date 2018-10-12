@@ -8,6 +8,8 @@ import           Agda.Compiler.Common
 import           Agda.Utils.Pretty
 import           Agda.Interaction.Options
 import           Agda.Syntax.Common (isIrrelevant)
+import           Agda.Syntax.Internal
+import           Agda.TypeChecking.Substitute
 import           Agda.TypeChecking.Primitive (getBuiltinName)
 import           Agda.TypeChecking.Monad.Builtin
 import           Agda.Utils.Lens
@@ -36,6 +38,12 @@ import qualified Agda.Compiler.Malfunction.Compiler  as Mlf
 import           Agda.Compiler.Malfunction.Pragmas
 import           Agda.Compiler.Malfunction.Optimize
 import           Agda.Compiler.Malfunction.EraseDefs
+
+
+
+
+--TODO Remove
+import Debug.Trace
 
 
 -- TODO Replace it with throwimpossible.
@@ -226,7 +234,7 @@ handlePragmas Defn{defArgInfo = info, defName = q} | isIrrelevant info = do
   reportSDoc "compile.ghc.definition" 10 $
            pure $ text "Not compiling" <+> (pretty q <> text ".")
   pure Nothing
-handlePragmas def@Defn{defName = q , theDef = d} = do
+handlePragmas def@Defn{defName = q , defType = ty , theDef = d} = do
   reportSDoc "compile.ghc.definition" 10 $ pure $ vcat
     [ text "Compiling" <+> pretty q <> text ":"
     , nest 2 $ text (show d)
@@ -265,11 +273,18 @@ handlePragmas def@Defn{defName = q , theDef = d} = do
       _ | Just q == mlevel -> pure Nothing
 
 
-      Axiom{} -> 
-        case pragma of
-          Nothing -> genericError $ "Error : There are postulates that have not been defined : " ++ prettyShow q
-          _ -> pure $ error "IMPOSSIBLE"
+      Axiom{} -> do
 
+       -- We ignore Axioms on Sets.
+       -- This backend has a single predefined representation of
+       -- datatypes.
+        let tl = isSort $ unEl $ theCore $ telView' ty
+        case tl of
+            Just _ ->  pure Nothing
+            _    -> case pragma of
+                       Nothing -> genericError
+                           $ "Error : There are postulates that have not been defined : " ++ prettyShow q
+                       _ -> error "IMPOSSIBLE"
 
       Datatype{} -> pure $ Just $ Left $ Left def
       Record{} -> pure $ Just $ Left $ Left def
