@@ -1,5 +1,5 @@
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE RecordWildCards, OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings #-}
 {- |
 Module      :  Agda.Compiler.Malfunction.Compiler
 Maintainer  :  janmasrovira@gmail.com, hanghj@student.chalmers.se
@@ -10,7 +10,7 @@ This module includes functions that compile from <agda.readthedocs.io Agda> to
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE LambdaCase #-}
-{-# OPTIONS_GHC -Wall -Wno-unused-top-binds #-}
+{-# OPTIONS_GHC -Wall -Wno-name-shadowing #-}
 module Agda.Compiler.Malfunction.Compiler
   (
   -- * Translation functions
@@ -37,15 +37,15 @@ module Agda.Compiler.Malfunction.Compiler
   , module Agda.Compiler.Malfunction.AST
   ) where
 
-import           Agda.Syntax.Common (NameId(..) , Delayed(..))
+import           Agda.Syntax.Common (NameId(..) , Delayed(..) , isIrrelevant)
 import           Agda.Syntax.Literal
 import           Agda.Syntax.Treeless
 
-import           Control.Monad.Extra (ifM)
 import           Data.List.Extra (intercalate)
 import           Control.Monad.Reader
 import           Data.Ix (inRange, rangeSize)
 import           Data.Map (Map)
+import           Data.Either
 import qualified Data.Map as Map
 import           Data.Maybe (mapMaybe , fromMaybe , maybeToList , catMaybes)
 import           Data.Set (Set)
@@ -54,20 +54,77 @@ import           Data.Tuple.Extra (first)
 import           Numeric (showHex)
 import           Data.Char (ord)
 import           GHC.Exts (IsList(..))
+import           Data.Graph
 
 import           Agda.TypeChecking.Monad.Base
 import           Agda.TypeChecking.Monad
-import           Agda.TypeChecking.Positivity.Occurrence
   
 import           Agda.Compiler.ToTreeless
 
 
 import           Agda.Compiler.Malfunction.AST
 import qualified Agda.Compiler.Malfunction.Primitive as Primitive
+import           Agda.Compiler.Malfunction.Pragmas
+
 
 
 --TODO Remove
 import Debug.Trace
+
+
+
+
+
+
+
+
+import           Prelude hiding ((<>))
+import           Agda.Utils.Pretty
+import           Agda.Syntax.Internal hiding (Term)
+import           Agda.TypeChecking.Substitute
+import           Agda.TypeChecking.Primitive (getBuiltinName)
+import           Agda.TypeChecking.Monad.Builtin
+import           Agda.Utils.Lens
+import           Agda.TypeChecking.Warnings
+
+
+
+
+
+
+-- TODO Review this code.
+dependencyGraph :: [(QName, TTerm)] -> [SCC (QName, TTerm)]
+dependencyGraph qs = stronglyConnComp [ ((qn, tt), qnameNameId qn, edgesFrom tt)
+                                    | (qn, tt) <- qs ]
+  where edgesFrom = Set.toList . qnamesIdsInTerm
+
+
+qnamesIdsInTerm :: TTerm -> Set NameId
+qnamesIdsInTerm t = go t mempty
+  where
+    insertId q = Set.insert (qnameNameId q)
+    go :: TTerm -> Set NameId -> Set NameId
+    go t qs = case t of
+      TDef q -> insertId q qs
+      TApp f args -> foldr go qs (f:args)
+      TLam b -> go b qs
+      TCon q -> insertId q qs
+      TLet a b -> foldr go qs [a, b]
+      TCase _ _ p alts -> foldr qnamesInAlt (go p qs) alts
+      _  -> qs
+      where
+        qnamesInAlt a qs = case a of
+          TACon q _ t -> insertId q (go t qs)
+          TAGuard t b -> foldr go qs [t, b]
+          TALit _ b -> go b qs
+
+
+
+
+
+
+
+
 
 -- Contains information about constructors that are to be inlined. Some constructors cannot be inlined.
 data Env = Env
@@ -86,7 +143,6 @@ data ConRep =
     { conTag :: Int }
             deriving (Show)
 
-type Translate a = Reader Env a
 type Arity = Int
 
 runTranslate :: Reader Env a -> Env -> a
@@ -218,13 +274,13 @@ translateTerm = \case
     (var, t1') <- introVar (translateTerm t1)
     return (Mlet [Named var t0'] t1')
   -- @deflt@ is the default value if all @alt@s fail.
-  -- TODO Handle the case where this is a lazy match if possible.
 
+-- TODO Handle the case where this is a lazy match if possible.
 --     case (caseLazy cinfo) of
 --       True -> pure $ error "caseLazy error."
 --       False -> do
 
-  TCase i cinfo deflt alts -> do
+  TCase i _ deflt alts -> do
       t <- indexToVarTerm i
       alts' <- alternatives t
       return $ Mswitch t alts'
@@ -396,14 +452,6 @@ translatePrim tp =
 
 
 
-
-
-isConstructor :: MonadReader Env m => QName -> m Bool
-isConstructor nm = (qnameNameId nm `Map.member`) <$> askConMap
-
-askConMap :: MonadReader Env m => m (Map NameId ConRep)
-askConMap = asks conMap
-
 -- |
 -- Set of indices of the variables that are referenced inside the term.
 --
@@ -492,11 +540,6 @@ qnameNameId :: QName -> NameId
 qnameNameId = nameId . qnameName
 
 
-translateMutualGroup :: MonadReader Env m => [(QName, TTerm)] -> m Binding
-translateMutualGroup bs = Recursive <$> mapM (uncurry translateBindingPair) bs
-
-translateBinding :: MonadReader Env m => QName -> TTerm -> m Binding
-translateBinding q t = uncurry Named <$> translateBindingPair q t
 
 translateBindingPair :: MonadReader Env m => QName -> TTerm -> m (Ident, Term)
 translateBindingPair q t = do
@@ -504,26 +547,6 @@ translateBindingPair q t = do
   (\t' -> (iden, t')) <$> translateTerm t
 
 
-
-
-qnamesIdsInTerm :: TTerm -> Set NameId
-qnamesIdsInTerm term = go term mempty
-  where
-    insertId q = Set.insert (qnameNameId q)
-    go :: TTerm -> Set NameId -> Set NameId
-    go t qs = case t of
-      TDef q -> insertId q qs
-      TApp f args -> foldr go qs (f:args)
-      TLam b -> go b qs
-      TCon q -> insertId q qs
-      TLet a b -> foldr go qs [a, b]
-      TCase _ _ p alts -> foldr qnamesInAlt (go p qs) alts
-      _  -> qs
-      where
-        qnamesInAlt a qs' = case a of
-          TACon q _ t' -> insertId q (go t' qs')
-          TAGuard t' b -> foldr go qs' [t', b]
-          TALit _ b -> go b qs'
 
 -- | Defines a run-time error in Malfunction - equivalent to @error@ in Haskell.
 errorT :: String -> Term
@@ -539,30 +562,15 @@ boolToInt b = if b then 1 else 0
 trueCase :: [Case]
 trueCase = [CaseInt 1]
 
--- -- TODO: Stub implementation!
--- -- Translating axioms seem to be problematic. For the other compiler they are
--- -- defined in Agda.TypeChecking.Monad.Base. It is a field of
--- -- `CompiledRepresentation`. We do not have this luxury. So what do we do?
--- --
--- -- | Translates an axiom to a malfunction binding. Returns `Nothing` if the axiom is unmapped.
--- compileAxiom ::
---   QName                 -- The name of the axiom
---   -> Maybe Binding      -- The resulting binding
--- compileAxiom q = do
---                    case x of
---                      Just z -> Just $ namedBinding q z
---                      Nothing -> Nothing
---   where
---     x = Map.lookup (show q') Primitive.axioms
---     q' = last . qnameToList $ q
+
 
 -- | Translates a primitive to a malfunction binding. Returns `Nothing` if the primitive is unmapped.
 compilePrim
   :: QName -- ^ The qname of the primitive
   -> String -- ^ The name of the primitive
-  -> Maybe Binding
+  -> Maybe (Ident , Term)
 compilePrim q s = case x of
-                    Just y -> Just $ namedBinding q y
+                    Just y -> Just (nameToIdent q , y)
                     Nothing -> Nothing
   where
     x = Map.lookup s Primitive.primitives
@@ -571,62 +579,151 @@ namedBinding :: QName -> Term -> Binding
 namedBinding q t = (`Named`t) $ nameToIdent q
 
 
-allUnused :: [Occurrence] -> Bool
-allUnused [] = True
-allUnused (Unused : ms) = allUnused ms
-allUnused (_ : _) = False
+
+
+handlePragma :: Definition -> TCM (Maybe (Either Definition [(Ident , Term)]))
+handlePragma Defn{defArgInfo = info, defName = q} | isIrrelevant info = do
+  reportSDoc "compile.ghc.definition" 10 $
+           pure $ text "Not compiling" <+> (pretty q <> text ".")
+  pure Nothing
+handlePragma def@Defn{defName = q , defType = ty , theDef = d} = do
+  reportSDoc "compile.ghc.definition" 10 $ pure $ vcat
+    [ text "Compiling" <+> pretty q <> text ":"
+    , nest 2 $ text (show d)
+    ]
+  pragma <- getOCamlPragma q
+  minf   <- getBuiltinName builtinInf
+  mflat  <- getBuiltinName builtinFlat
+  mlevel <- getBuiltinName builtinLevel
+  
+  case d of
+       -- TODO is this necessary? Probably yes.
+      _ | Just OCDefn{} <- pragma, Just q == mflat ->
+        genericError
+          "\"COMPILE OCaml\" pragmas are not allowed for the FLAT builtin."
+
+
+      _ | Just (OCDefn r oc) <- pragma -> setCurrentRange r $ do
+        -- Check that the function isn't INLINE (since that will make this
+        -- definition pointless).
+        inline <- (^. funInline) . theDef <$> getConstInfo q
+        when inline $ warning $ UselessInline q
+        -- TODO At the moment we do not check that the type of the OCaml function corresponds to the
+        -- type of the agda function or the postulate.
+        let ident = nameToIdent q
+            mdn = (toTopLevelModuleName . qnameModule) q
+            longIdent = topModNameToLIdent "ForeignCode" mdn oc
+        pure $ Just $ Right [(ident , (Mglobal longIdent))]
+        
+
+      -- TODO is this necessary?
+      -- Compiling Inf
+      _ | Just q == minf -> genericError "Inf is not supported at the moment."
+
+
+      -- Level is ignored . We compile it to Unit.
+      _ | Just q == mlevel -> pure Nothing
+
+
+      Axiom{} -> do
+
+       -- We ignore Axioms on Sets.
+       -- This backend has a single predefined representation of
+       -- datatypes.
+        let tl = isSort $ unEl $ theCore $ telView' ty
+        case tl of
+            Just _ ->  pure Nothing
+            _    -> case pragma of
+                       Nothing -> genericError
+                           $ "Error : There are postulates that have not been defined : " ++ prettyShow q
+                       _ -> error "IMPOSSIBLE"
+
+      Datatype{} -> error $ "Please Report it as a bug."
+      Record{} -> error $ "Please Report it as a bug."
+      Primitive{} -> pure $ Just $ Left def
+      Function{} -> pure $ Just $ Left def
+      _ -> pure Nothing
+
+
+
 
 
 -- The map is used to check if the definition has already been processed.
 -- This is due to recursive definitions.
-handleFunction :: Env -> Definition -> Map QName Definition -> TCM (Map QName Definition , Maybe Binding)
-handleFunction env def@(Defn{defName = q , defArgOccurrences = ocs , defNoCompilation = noC , theDef = d}) rmap = 
-  case Map.lookup q rmap of
-    Nothing -> pure (rmap , Nothing)
-    Just _ -> case d of
-      Function{funMutual = mrec , funDelayed = delayed} ->
+handleFunctionNoPragma :: Env -> Definition -> TCM (Maybe (Ident , Term))
+handleFunctionNoPragma env (Defn{defName = q , theDef = d}) = 
+  case d of
+    Function{funDelayed = delayed} ->
        do
          case delayed of
 -- TODO Handle the case where it is delayed.
            Delayed -> error $ "Delayed is set to True for function name :" ++ prettyShow q
-           NotDelayed -> pure ()
-      -- TODO Clean this if Agda's behavior changes.
-         case noC || allUnused ocs of
-           True -> pure ( Map.delete q rmap , Nothing)
-           _ ->
-             case mrec of -- trace ("\n\n ------\n " ++ prettyShow def ++ "\n\nShould I not compile?\n" ++ prettyShow noC) mrec of
-              Nothing -> error $ "the positivity checher has not determined mutual recursion yet : "
-                                 ++ prettyShow def ++ "Should I not compile?" ++ prettyShow noC
-              Just [] ->  do
-                mt <- toTreeless q
-                pure ( Map.delete q rmap , maybe Nothing (\t -> Just $ runTranslate (translateBinding q t) env) mt)
-              Just mq -> do
-                mts <- mapM (\x -> do
-                                     xdef <- theDef <$> getConstInfo x
-                                     case xdef of
-                                       Function{} -> maybe Nothing (\t -> Just (x , t)) <$> toTreeless x
-                                       _ ->  pure Nothing                                    ) mq
-                
-                pure ( foldr Map.delete rmap mq , Just $ runTranslate (translateMutualGroup (catMaybes mts)) env)
-      Primitive{primName = s} -> pure (Map.delete q rmap , compilePrim q s)
-      _ -> pure $ error "At handleFunction : Case not expected."
+           NotDelayed -> do
+              mt <- toTreeless q
+              pure $ maybe Nothing (\t -> Just $ runTranslate (translateBindingPair q t) env) mt
+    Primitive{primName = s} -> pure $ compilePrim q s
+    _ -> pure $ error "At handleFunction : Case not expected."
         
 
 
+handleFunction :: Env -> Definition -> TCM [(Ident , Term)]
+handleFunction env def@(Defn{defNoCompilation = noC}) = 
+  case noC of
+    True -> pure []
+    False -> do
+      r <- handlePragma (trace (prettyShow $ defName def) def)
+      case r of
+        Nothing -> pure []
+        Just (Right bs) -> pure bs 
+        Just (Left _) -> do
+          b <- handleFunctionNoPragma env def 
+          pure (maybeToList b)
 
-handleFunctions :: Env -> [Definition] -> Map QName Definition -> TCM [Binding]
-handleFunctions env (d : ds) mp = do
-  (nmp , b) <- handleFunction env d mp
-  (maybeToList b ++) <$> handleFunctions env ds nmp
-handleFunctions _ [] _ = pure []
+
+handleFunctions :: Env -> [Definition] -> TCM [Binding]
+handleFunctions env allDefs = do
+  let (others , fns) = splitPrim allDefs
+  os <- mapM (handleFunction env) others
+  let obs = map (\x -> Named (fst x) (snd x)) (concat os)
+  qts <- mapM (\x -> do
+                  let q = defName x
+                  t <- toTreeless q
+                  pure $ maybe Nothing (\rt -> Just (q , rt)) t) fns
+  let recGrps = dependencyGraph (catMaybes qts)
+  tmp <- mapM translateSCC recGrps
+  pure $ obs ++ concat tmp           where
+    translateSCC scc = case scc of
+      AcyclicSCC single -> do
+        def <- getConstInfo (fst single)
+        rs <- handleFunction env def
+        pure $ map (\x -> Named (fst x) (snd x)) rs
+      CyclicSCC grp -> do
+        defs <- mapM (getConstInfo . fst) grp
+        rs <- mapM (handleFunction env) defs
+        pure $ [Recursive (concat rs)]
+     -- We handle primitives differently here because
+     -- toTreeless fails on primitives.
+    splitPrim :: [Definition] -> ([Definition] , [Definition])
+    splitPrim = partitionEithers . map (\def -> case (theDef def) of
+                                        Function{} -> Right def
+                                        _        -> Left def  ) 
               
 
 
 
 compile
-  :: Env -> [Definition]
+  :: [Definition]
   -> TCM [Binding]
-compile env defs = handleFunctions env defs (Map.fromList $ map (\x -> (defName x , x)) defs)
+compile defs = do
+  let (dts , others) = split defs
+  env <- mkCompilerEnv dts
+  handleFunctions env others where
+    split :: [Definition] -> ([Definition] , [Definition])
+    split xs = partitionEithers
+               $ map (\x -> case theDef x of
+                       Datatype{} -> Left x
+                       Record{} -> Left x
+                       _ ->  Right x  ) xs
 
 
 

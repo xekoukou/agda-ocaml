@@ -8,7 +8,7 @@ This module defines the abstract syntax of
 language specification>
 -}
 {-# LANGUAGE OverloadedStrings, UndecidableInstances #-}
-{-# OPTIONS_GHC -Wall #-}
+{-# OPTIONS_GHC -Wall -Wno-name-shadowing #-}
 module Agda.Compiler.Malfunction.AST
   ( IntType(..)
   , IntConst(..)

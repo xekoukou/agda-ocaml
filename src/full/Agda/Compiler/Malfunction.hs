@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -Wall #-}
+{-# OPTIONS_GHC -Wall -Wno-name-shadowing #-}
 module Agda.Compiler.Malfunction (backend) where
 
 import           Prelude hiding ((<>))
@@ -7,13 +7,6 @@ import           Agda.Compiler.CallCompiler
 import           Agda.Compiler.Common
 import           Agda.Utils.Pretty
 import           Agda.Interaction.Options
-import           Agda.Syntax.Common (isIrrelevant)
-import           Agda.Syntax.Internal
-import           Agda.TypeChecking.Substitute
-import           Agda.TypeChecking.Primitive (getBuiltinName)
-import           Agda.TypeChecking.Monad.Builtin
-import           Agda.Utils.Lens
-import           Agda.TypeChecking.Warnings
 import           Agda.Syntax.Concrete.Name (TopLevelModuleName (..))
 
 
@@ -22,12 +15,10 @@ import           Agda.Syntax.Concrete.Name (TopLevelModuleName (..))
 import           Control.Monad
 import           Control.Monad.Extra
 import           Control.Monad.Trans
-import           Data.Either
 import           Data.List
 import           Data.Char
 import           Data.Map                            (Map)
 import qualified Data.Map                            as Map
-import           Data.Maybe
 import           Text.Printf
 import           System.FilePath.Posix
 import           System.Directory
@@ -35,9 +26,9 @@ import           System.Directory
 
 import           Agda.Compiler.Malfunction.AST
 import qualified Agda.Compiler.Malfunction.Compiler  as Mlf
-import           Agda.Compiler.Malfunction.Pragmas
 import           Agda.Compiler.Malfunction.Optimize
 import           Agda.Compiler.Malfunction.EraseDefs
+import           Agda.Compiler.Malfunction.Pragmas
 
 
 
@@ -149,11 +140,8 @@ mlfMod
   :: [Definition]   -- ^ All visible definitions
   -> TCM (Mod , IsMain)
 mlfMod allDefs = do
-  (eith , sbs) <- partitionEithers . catMaybes <$> mapM handlePragmas allDefs
-  let (dts, fns) = partitionEithers eith
-  env <- Mlf.mkCompilerEnv dts
-  bss <- Mlf.compile env fns
-  let (im , bs) = eraseB (concat sbs ++ bss)
+  bss <- Mlf.compile allDefs
+  let (im , bs) = eraseB bss
       rbs = optimizeLetsB bs
   pure (MMod rbs [] , im)
   
@@ -217,6 +205,7 @@ mlfCompile opts modIsMain mods = do
 
 
 
+
 compileToMLF :: [Definition] -> FilePath -> TCM IsMain
 compileToMLF defs fp = do
   (modl , im) <- mlfMod defs
@@ -225,72 +214,6 @@ compileToMLF defs fp = do
   pure im 
 
 
-
-
-
--- TODO Replace OcamlCode with a binding that use Mglobal
-handlePragmas :: Definition -> TCM (Maybe (Either (Either Definition Definition) [Binding]))
-handlePragmas Defn{defArgInfo = info, defName = q} | isIrrelevant info = do
-  reportSDoc "compile.ghc.definition" 10 $
-           pure $ text "Not compiling" <+> (pretty q <> text ".")
-  pure Nothing
-handlePragmas def@Defn{defName = q , defType = ty , theDef = d} = do
-  reportSDoc "compile.ghc.definition" 10 $ pure $ vcat
-    [ text "Compiling" <+> pretty q <> text ":"
-    , nest 2 $ text (show d)
-    ]
-  pragma <- getOCamlPragma q
-  minf   <- getBuiltinName builtinInf
-  mflat  <- getBuiltinName builtinFlat
-  mlevel <- getBuiltinName builtinLevel
-  
-  case d of
-       -- TODO is this necessary? Probably yes.
-      _ | Just OCDefn{} <- pragma, Just q == mflat ->
-        genericError
-          "\"COMPILE OCaml\" pragmas are not allowed for the FLAT builtin."
-
-
-      _ | Just (OCDefn r oc) <- pragma -> setCurrentRange r $ do
-        -- Check that the function isn't INLINE (since that will make this
-        -- definition pointless).
-        inline <- (^. funInline) . theDef <$> getConstInfo q
-        when inline $ warning $ UselessInline q
-        -- TODO At the moment we do not check that the type of the OCaml function corresponds to the
-        -- type of the agda function or the postulate.
-        let ident = Mlf.nameToIdent q
-            mdn = (toTopLevelModuleName . qnameModule) q
-            longIdent = topModNameToLIdent "ForeignCode" mdn oc
-        pure $ Just $ Right [Named ident (Mglobal longIdent)]
-        
-
-      -- TODO is this necessary?
-      -- Compiling Inf
-      _ | Just q == minf -> genericError "Inf is not supported at the moment."
-
-
-      -- Level is ignored . We compile it to Unit.
-      _ | Just q == mlevel -> pure Nothing
-
-
-      Axiom{} -> do
-
-       -- We ignore Axioms on Sets.
-       -- This backend has a single predefined representation of
-       -- datatypes.
-        let tl = isSort $ unEl $ theCore $ telView' ty
-        case tl of
-            Just _ ->  pure Nothing
-            _    -> case pragma of
-                       Nothing -> genericError
-                           $ "Error : There are postulates that have not been defined : " ++ prettyShow q
-                       _ -> error "IMPOSSIBLE"
-
-      Datatype{} -> pure $ Just $ Left $ Left def
-      Record{} -> pure $ Just $ Left $ Left def
-      Primitive{} -> pure $ Just $ Left $ Right def
-      Function{} -> pure $ Just $ Left $ Right def
-      _ -> pure Nothing
 
 
 

@@ -1,10 +1,8 @@
+{-# OPTIONS_GHC -Wall -Wno-name-shadowing -Wno-unused-matches#-}
 module Agda.Compiler.Malfunction.Optimize (optimizeLetsB) where
 
 import Agda.Compiler.Malfunction.AST
-import Agda.Compiler.Malfunction.EraseDefs
-import Agda.Compiler.Common
 import Data.List
-import Data.Bool
 import Data.Either
 import qualified Data.Map.Strict as M
 
@@ -77,44 +75,44 @@ replaceTrL [] t = t
 
 removeLets :: Term -> Term
 removeLets self@(Mvar i) = self
-removeLets self@(Mlambda a t) = let rm = removeLets t
-                                in Mlambda a rm
-removeLets self@(Mapply a bs) = let (na : nbs) = map removeLets (a : bs)
-                                in Mapply na nbs 
-removeLets self@(Mlet bs t) =  let mt = replaceTrL (map rpl bs) t
-                                   nt = removeLets mt
-                               in nt where
+removeLets (Mlambda a t) = let rm = removeLets t
+                           in Mlambda a rm
+removeLets (Mapply a bs) = let (na : nbs) = map removeLets (a : bs)
+                           in Mapply na nbs 
+removeLets (Mlet bs t) =  let mt = replaceTrL (map rpl bs) t
+                              nt = removeLets mt
+                          in nt where
   rpl :: Binding -> (Term , Term)
   rpl (Unnamed t) = error "Let bindings should have a name."
   rpl (Named x t) = (Mvar x , t)
   rpl (Recursive rs) = error "Let bindings cannot be recursive."
   
-removeLets self@(Mswitch ta tb) = let nta = removeLets ta
-                                      ntb = map (removeLets . snd) tb
-                                  in Mswitch nta (zipWith (\(c , _) nb -> (c , nb)) tb ntb)
-removeLets self@(Muiop x y t) = let nt = removeLets t
-                                in Muiop x y nt
-removeLets self@(Mbiop x y ta tb ) = let nta = removeLets ta
-                                         ntb = removeLets tb
-                                     in Mbiop x y nta ntb
-removeLets self@(Mconvert x y t) = let nt = removeLets t
-                                   in Mconvert x y nt
-removeLets self@(Mvecnew x ta tb) = let nta = removeLets ta
-                                        ntb = removeLets tb
-                                    in Mvecnew x nta ntb
-removeLets self@(Mvecget x ta tb) = let nta = removeLets ta
-                                        ntb = removeLets tb
-                                    in Mvecget x nta ntb
-removeLets self@(Mvecset x ta tb tc) = let nta = removeLets ta
-                                           ntb = removeLets tb
-                                           ntc = removeLets tc
-                                       in Mvecset x nta ntb ntc
-removeLets self@(Mveclen x t) = let nt = removeLets t
-                                in Mveclen x nt
-removeLets self@(Mblock x bs) = let nbs = map removeLets bs
-                                in Mblock x nbs
-removeLets self@(Mfield x t) = let nt = removeLets t
-                               in Mfield x nt
+removeLets (Mswitch ta tb) = let nta = removeLets ta
+                                 ntb = map (removeLets . snd) tb
+                             in Mswitch nta (zipWith (\(c , _) nb -> (c , nb)) tb ntb)
+removeLets (Muiop x y t) = let nt = removeLets t
+                           in Muiop x y nt
+removeLets (Mbiop x y ta tb ) = let nta = removeLets ta
+                                    ntb = removeLets tb
+                                in Mbiop x y nta ntb
+removeLets (Mconvert x y t) = let nt = removeLets t
+                              in Mconvert x y nt
+removeLets (Mvecnew x ta tb) = let nta = removeLets ta
+                                   ntb = removeLets tb
+                               in Mvecnew x nta ntb
+removeLets (Mvecget x ta tb) = let nta = removeLets ta
+                                   ntb = removeLets tb
+                               in Mvecget x nta ntb
+removeLets (Mvecset x ta tb tc) = let nta = removeLets ta
+                                      ntb = removeLets tb
+                                      ntc = removeLets tc
+                                  in Mvecset x nta ntb ntc
+removeLets (Mveclen x t) = let nt = removeLets t
+                           in Mveclen x nt
+removeLets (Mblock x bs) = let nbs = map removeLets bs
+                           in Mblock x nbs
+removeLets (Mfield x t) = let nt = removeLets t
+                          in Mfield x nt
 removeLets x =  x
  
 
@@ -218,32 +216,32 @@ findCF self@(Mswitch ta tb) =  do
                                  [] -> (\(_ , (_ , t , _)) -> t) (last rs)
                                  _ -> Mlet bs ((\(_ , (_ , t , _)) -> t) (last rs)))
 
-findCF  self@(Muiop x y t) = do (tms , nself) <- findCF  t
+findCF  (Muiop x y t) = do      (tms , nself) <- findCF  t
                                 pure (tms , Muiop x y nself)
-findCF  self@(Mbiop x y ta tb ) = do (tmsa , nta) <- findCF  ta
+findCF  (Mbiop x y ta tb ) = do      (tmsa , nta) <- findCF  ta
                                      (tmsb , ntb) <- findCF  tb
                                      let inters = M.intersection tmsa tmsb
                                          newInters = M.map (\(a , b , c) -> (a , b , True)) inters
                                          all = M.union tmsa tmsb
                                          nall = newInters `M.union` all
                                      pure (nall , Mbiop x y nta ntb)
-findCF  self@(Mconvert x y t) = do (tms , nself) <- findCF  t
+findCF  (Mconvert x y t) = do      (tms , nself) <- findCF  t
                                    pure (tms , Mconvert x y nself)
-findCF  self@(Mvecnew x ta tb) =  do (tmsa , nta) <- findCF  ta
+findCF  (Mvecnew x ta tb) =  do      (tmsa , nta) <- findCF  ta
                                      (tmsb , ntb) <- findCF  tb
                                      let inters = M.intersection tmsa tmsb
                                          newInters = M.map (\(a , b , c) -> (a , b , True)) inters
                                          all = M.union tmsa tmsb
                                          nall = newInters `M.union` all
                                      pure (nall , Mvecnew x nta ntb)
-findCF  self@(Mvecget x ta tb) = do (tmsa , nta) <- findCF  ta
+findCF  (Mvecget x ta tb) = do      (tmsa , nta) <- findCF  ta
                                     (tmsb , ntb) <- findCF  tb
                                     let inters = M.intersection tmsa tmsb
                                         newInters = M.map (\(a , b , c) -> (a , b , True)) inters
                                         all = M.union tmsa tmsb
                                         nall = newInters `M.union` all
                                     pure (nall , Mvecget x nta ntb)
-findCF  self@(Mvecset x ta tb tc) =  do (tmsa , nta) <- findCF  ta
+findCF  (Mvecset x ta tb tc) =  do      (tmsa , nta) <- findCF  ta
                                         (tmsb , ntb) <- findCF  tb
                                         (tmsc , ntc) <- findCF  tc
                                         let inters = M.intersection (M.intersection tmsa tmsb) tmsc
@@ -251,9 +249,9 @@ findCF  self@(Mvecset x ta tb tc) =  do (tmsa , nta) <- findCF  ta
                                             all = M.union (M.union tmsa tmsb) tmsc
                                             nall = newInters `M.union` all
                                         pure (nall , Mvecset x nta ntb ntc)
-findCF  self@(Mveclen x t) =  do (tms , nself) <- findCF  t
-                                 pure (tms , Mveclen x nself)
-findCF  self@(Mblock x bs) =  do
+findCF  (Mveclen x t) =  do (tms , nself) <- findCF  t
+                            pure (tms , Mveclen x nself)
+findCF  (Mblock x bs) =  do
                                  rs <- mapM findCF bs
                               
                                  let inters = lintersect (map fst rs)
@@ -261,8 +259,8 @@ findCF  self@(Mblock x bs) =  do
                                      all = foldr (\a b -> M.union (fst a) b)  M.empty rs
                                      nall = newInters `M.union` all
                                  pure (nall , Mblock x (map snd rs))
-findCF  self@(Mfield x t) =   do (tms , nself) <- findCF  t
-                                 pure (tms , Mfield x nself)
+findCF  (Mfield x t) =   do (tms , nself) <- findCF  t
+                            pure (tms , Mfield x nself)
 findCF  x = pure (M.empty , x)
 
 
@@ -292,15 +290,15 @@ introduceLets t =
 
 removeLetsVar :: Term -> Term
 removeLetsVar self@(Mvar i) = self
-removeLetsVar self@(Mlambda a t) = let rm = removeLetsVar t
-                                in Mlambda a rm
-removeLetsVar self@(Mapply a bs) = let (na : nbs) = map removeLetsVar (a : bs)
-                                in Mapply na nbs 
-removeLetsVar self@(Mlet bs t) = let (trm , tkp) = partitionEithers (map rpl bs)
-                                     mt = foldr (\x y -> replaceTr (fst x) (snd x) y) t trm
-                                     ntkp = foldr (\x y -> map (\(Named id t) -> Named id (replaceTr (fst x) (snd x) t )) y) tkp trm
-                                     nt = removeLetsVar mt
-                                 in (case ntkp of
+removeLetsVar (Mlambda a t) = let rm = removeLetsVar t
+                              in Mlambda a rm
+removeLetsVar (Mapply a bs) = let (na : nbs) = map removeLetsVar (a : bs)
+                              in Mapply na nbs 
+removeLetsVar (Mlet bs t) = let (trm , tkp) = partitionEithers (map rpl bs)
+                                mt = foldr (\x y -> replaceTr (fst x) (snd x) y) t trm
+                                ntkp = foldr (\x y -> map (\(Named id t) -> Named id (replaceTr (fst x) (snd x) t )) y) tkp trm
+                                nt = removeLetsVar mt
+                            in (case ntkp of
                                         [] -> nt
                                         _  -> Mlet ntkp nt)         where
   rpl :: Binding -> Either (Term , Term) Binding
@@ -309,32 +307,32 @@ removeLetsVar self@(Mlet bs t) = let (trm , tkp) = partitionEithers (map rpl bs)
   rpl self@(Named x t) = Right self
   rpl (Recursive rs) = error "Let bindings cannot be recursive."
   
-removeLetsVar self@(Mswitch ta tb) = let nta = removeLetsVar ta
-                                         ntb = map (removeLetsVar . snd) tb
-                                     in Mswitch nta (zipWith (\(c , _) nb -> (c , nb)) tb ntb)
-removeLetsVar self@(Muiop x y t) = let nt = removeLetsVar t
-                                   in Muiop x y nt
-removeLetsVar self@(Mbiop x y ta tb ) = let nta = removeLetsVar ta
-                                            ntb = removeLetsVar tb
-                                        in Mbiop x y nta ntb
-removeLetsVar self@(Mconvert x y t) = let nt = removeLetsVar t
-                                      in Mconvert x y nt
-removeLetsVar self@(Mvecnew x ta tb) = let nta = removeLetsVar ta
-                                           ntb = removeLetsVar tb
-                                       in Mvecnew x nta ntb
-removeLetsVar self@(Mvecget x ta tb) = let nta = removeLetsVar ta
-                                           ntb = removeLetsVar tb
-                                       in Mvecget x nta ntb
-removeLetsVar self@(Mvecset x ta tb tc) = let nta = removeLetsVar ta
-                                              ntb = removeLetsVar tb
-                                              ntc = removeLetsVar tc
-                                          in Mvecset x nta ntb ntc
-removeLetsVar self@(Mveclen x t) = let nt = removeLetsVar t
-                                   in Mveclen x nt
-removeLetsVar self@(Mblock x bs) = let nbs = map removeLetsVar bs
-                                   in Mblock x nbs
-removeLetsVar self@(Mfield x t) = let nt = removeLetsVar t
-                                  in Mfield x nt
+removeLetsVar (Mswitch ta tb) = let nta = removeLetsVar ta
+                                    ntb = map (removeLetsVar . snd) tb
+                                in Mswitch nta (zipWith (\(c , _) nb -> (c , nb)) tb ntb)
+removeLetsVar (Muiop x y t) = let nt = removeLetsVar t
+                              in Muiop x y nt
+removeLetsVar (Mbiop x y ta tb ) = let nta = removeLetsVar ta
+                                       ntb = removeLetsVar tb
+                                   in Mbiop x y nta ntb
+removeLetsVar (Mconvert x y t) = let nt = removeLetsVar t
+                                 in Mconvert x y nt
+removeLetsVar (Mvecnew x ta tb) = let nta = removeLetsVar ta
+                                      ntb = removeLetsVar tb
+                                  in Mvecnew x nta ntb
+removeLetsVar (Mvecget x ta tb) = let nta = removeLetsVar ta
+                                      ntb = removeLetsVar tb
+                                  in Mvecget x nta ntb
+removeLetsVar (Mvecset x ta tb tc) = let nta = removeLetsVar ta
+                                         ntb = removeLetsVar tb
+                                         ntc = removeLetsVar tc
+                                     in Mvecset x nta ntb ntc
+removeLetsVar (Mveclen x t) = let nt = removeLetsVar t
+                              in Mveclen x nt
+removeLetsVar (Mblock x bs) = let nbs = map removeLetsVar bs
+                              in Mblock x nbs
+removeLetsVar (Mfield x t) = let nt = removeLetsVar t
+                             in Mfield x nt
 removeLetsVar x =  x
 
 
@@ -345,7 +343,7 @@ removeLetsVar x =  x
 
 -- Used in Functions.
 optimizeLets :: Term -> Term
-optimizeLets (Mlambda ids t) = Mlambda ids (removeLetsVar $ introduceLets $ removeLets t) -- (introduceLets $ removeLets t)
+optimizeLets (Mlambda ids t) = Mlambda ids (removeLetsVar $ introduceLets $ removeLets t)
 optimizeLets (Mblock tag tms) = Mblock tag (map (removeLetsVar . introduceLets . removeLets) tms)
 optimizeLets r = r
 
