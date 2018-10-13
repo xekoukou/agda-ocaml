@@ -219,13 +219,15 @@ translateTerm = \case
     return (Mlet [Named var t0'] t1')
   -- @deflt@ is the default value if all @alt@s fail.
   -- TODO Handle the case where this is a lazy match if possible.
+
+--     case (caseLazy cinfo) of
+--       True -> pure $ error "caseLazy error."
+--       False -> do
+
   TCase i cinfo deflt alts -> do
-    case (caseLazy cinfo) of
-      True -> error "caseLazy error."
-      False -> do
-        t <- indexToVarTerm i
-        alts' <- alternatives t
-        return $ Mswitch t alts'
+      t <- indexToVarTerm i
+      alts' <- alternatives t
+      return $ Mswitch t alts'
     where
       alternatives t = do
           d <- translateTerm deflt
@@ -388,7 +390,7 @@ translatePrim tp =
     intbinop typ op = Mlambda ["a" , "b"] $ Mbiop op typ (Mvar "a") (Mvar "b")
     
     -- TODO The RedBlack.agda test gave 3 args in pseq where the last one was unreachable.
-    notSupported = error "Not supported by the OCaml backend."
+    notSupported = errorT "Not supported by the OCaml backend."
     wrong = undefined
 
 
@@ -592,17 +594,18 @@ handleFunction env def@(Defn{defName = q , defArgOccurrences = ocs , defNoCompil
          case noC || allUnused ocs of
            True -> pure ( Map.delete q rmap , Nothing)
            _ ->
-             case mrec of
-              Nothing -> error $ "the positivity checher has not determined mutual recursion yet : " ++ prettyShow def ++ "Should I compile?" ++ prettyShow noC
+             case mrec of -- trace ("\n\n ------\n " ++ prettyShow def ++ "\n\nShould I not compile?\n" ++ prettyShow noC) mrec of
+              Nothing -> error $ "the positivity checher has not determined mutual recursion yet : "
+                                 ++ prettyShow def ++ "Should I not compile?" ++ prettyShow noC
               Just [] ->  do
                 mt <- toTreeless q
                 pure ( Map.delete q rmap , maybe Nothing (\t -> Just $ runTranslate (translateBinding q t) env) mt)
               Just mq -> do
                 mts <- mapM (\x -> do
-                                     y <- toTreeless x
-                                     case y of
-                                       Just t -> pure $ Just (x , t)
-                                       Nothing -> pure Nothing ) mq
+                                     xdef <- theDef <$> getConstInfo x
+                                     case xdef of
+                                       Function{} -> maybe Nothing (\t -> Just (x , t)) <$> toTreeless x
+                                       _ ->  pure Nothing                                    ) mq
                 
                 pure ( foldr Map.delete rmap mq , Just $ runTranslate (translateMutualGroup (catMaybes mts)) env)
       Primitive{primName = s} -> pure (Map.delete q rmap , compilePrim q s)

@@ -358,17 +358,24 @@ instance Pretty BinaryIntOp where
     Eq  -> "==.ibig"
 
 
+
+-- TODO Is this correct?
+-- To do this property, we would need to add the type
+-- on all the arguments on lambdas.
+--- so for the moment , we simply put "".
 prettyTypedTerm :: IntType -> Term -> Doc
 prettyTypedTerm tp t = case tp of
-  TInt -> pretty t
-  _    -> pretty t <.> pretty tp
+--  TInt -> pretty t
+  _    -> pretty t -- <.> pretty tp
+
+
 
 instance Pretty IntType where
   pretty tp = case tp of
-    TInt    -> "int"
-    TInt32  -> "int32"
-    TInt64  -> "int64"
-    TBigint -> "bigint"
+    TInt    -> ""
+    TInt32  -> "i32"
+    TInt64  -> "i64"
+    TBigint -> "ibig"
 
 
 topModNameToLIdent :: String -> TopLevelModuleName -> String -> Longident
