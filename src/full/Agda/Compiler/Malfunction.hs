@@ -47,30 +47,40 @@ backend = Backend backend'
 
 data MlfOptions = Opts
   { optMLFCompile    :: Bool
+  , optMLFLib        :: Bool
   , optCallMLF       :: Bool
   , optDebugMLF      :: Bool
+  , optOCamlDeps     :: String
   }
 
 defOptions :: MlfOptions
 defOptions = Opts
   { optMLFCompile    = False
+  , optMLFLib        = False
   , optCallMLF       = True
   , optDebugMLF      = False
+  , optOCamlDeps     = "zarith"
   }
 
 
 ttFlags :: [OptDescr (Flag MlfOptions)]
 ttFlags =
   [ Option [] ["mlf"] (NoArg enable)
-    "Generate Malfunction"
+    "Use the Malfunction backend."
   , Option [] ["dont-call-mlf"] (NoArg dontCallMLF)
-    "Runs the malfunction compiler on the output file"
+    "Do not call the malfunction compiler on the output file"
+  , Option [] ["cmx"] (NoArg onlyCMX)
+    "Create a .cmx file instead of an executable."
+  , Option [] ["-linkpkg"] (ReqArg whichlibs "pkg1,pkg2")
+    "Link the specified packages."
   , Option [] ["d"] (NoArg debugMLF)
     "Generate Debugging Information."
   ]
  where
    enable o = pure o{optMLFCompile = True}
    dontCallMLF o = pure o{optCallMLF = False}
+   onlyCMX o = pure o{optMLFLib = True}
+   whichlibs s o = pure o{optOCamlDeps = "zarith" ++ s}
    debugMLF o = pure o{optDebugMLF = True}
   
 -- We do not support separate compilation.
@@ -179,7 +189,8 @@ mlfCompile opts modIsMain mods = do
   
   -- Perform the transformation to malfunction
   im <- compileToMLF allDefs fp
-  writeCodeToModule dir
+  let fcfp = mdir ++ "/ForeignCode.ml"
+  writeCodeToModule fcfp
   let isMain = mappend modIsMain im -- both need to be IsMain
 
   
@@ -188,16 +199,28 @@ mlfCompile opts modIsMain mods = do
                ("No main function defined in " ++ (show . pretty) agdaMod ++ " . Use --no-main to suppress this warning.")
     False -> pure ()
 
-  let op = case isMain of
-             IsMain -> "compile"
-             NotMain -> "cmx"
+  let returnLib = case isMain of
+             IsMain -> optMLFLib opts
+             NotMain -> True
   
   -- Perform the Compilation if requested.
-  
-  let args = [op] ++ [fp] ++ (if isMain == IsMain then ["-o", mdir </> show (nameConcrete outputName)] else [])
-  let doCall = optCallMLF opts
-      compiler = "malfunction"
-  callCompiler doCall compiler args
+
+  let args_mlf = ["cmx"] ++ [fp]
+      args_ocaml = "ocamlopt" : "-c" : "-linkpkg" : "-package" : (optOCamlDeps opts) : fcfp : []
+      doCall = optCallMLF opts
+      ocamlopt = "ocamlfind"
+      mlf = "malfunction"
+      exec_path = mdir </> show (nameConcrete outputName)
+  callCompiler doCall ocamlopt args_ocaml
+  callCompiler doCall mlf args_mlf
+  case returnLib of
+    True -> pure ()
+    False -> do
+      let fcfpcmx = replaceExtension fcfp "cmx"
+          fpcmx = replaceExtension fp "cmx"
+          args_focaml = "ocamlopt" : "-o" : exec_path : "-linkpkg" : "-package" : (optOCamlDeps opts) : fcfpcmx : fpcmx : []
+      callCompiler doCall ocamlopt args_focaml
+      
   where
     allDefs :: [Definition]
     allDefs = concat (Map.elems mods)
@@ -223,13 +246,13 @@ compileToMLF defs fp = do
 
 
 writeCodeToModule :: FilePath -> TCM ()
-writeCodeToModule dir = do
+writeCodeToModule fp = do
   ifs <- map miInterface . Map.elems <$> getVisitedModules
   let fcs = foldr (\i s-> let mfc = (Map.lookup "OCaml" . iForeignCode) i
                           in case mfc of
                               Just c -> s ++ [((moduleNameParts . toTopLevelModuleName . iModuleName) i , intercalate "\n\n" $ reverse $ map getCode c)]
                               _ -> s ) [] ifs
-  liftIO ((dir ++ "/ForeignCode.ml") `writeFile` retCode fcs) where
+  liftIO (fp `writeFile` retCode fcs) where
     getCode (ForeignCode _ code)  = code
     retCode :: [([String] , OCamlCode)] -> String
     retCode g = let mp = Map.fromList g

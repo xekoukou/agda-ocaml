@@ -671,7 +671,7 @@ handleFunction env def@(Defn{defNoCompilation = noC}) =
   case noC of
     True -> pure []
     False -> do
-      r <- handlePragma (trace (prettyShow $ defName def) def)
+      r <- handlePragma def
       case r of
         Nothing -> pure []
         Just (Right bs) -> pure bs 
