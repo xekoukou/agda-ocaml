@@ -2,6 +2,7 @@
 module Agda.Compiler.Malfunction.Optimize (optimizeLetsB) where
 
 import Agda.Compiler.Malfunction.AST
+import Agda.Compiler.Malfunction.EraseDefs
 import Data.List
 import Data.Either
 import qualified Data.Map.Strict as M
@@ -173,8 +174,10 @@ lintersect [] = M.empty
 findCF :: Term -> UIDState (M.Map Term (Term , Integer , Bool) , Term)
 findCF self@(Mvar i) = pure (M.empty , self)
 findCF self@(Mlambda ids t) = do
-                                (tms , nself) <- findCF t
-                                pure (tms , Mlambda ids nself)
+                 (nr , _ , nself) <- inFilteredLets t (\k (_ , _ , c) -> let ui = findUsedIdents t
+                                                                             int = intersect ui ids
+                                                                         in (not $ null int) && c)
+                 pure (nr , Mlambda ids nself)
 -- We need to perform findCF on a and bs when we create the let statement.
 findCF self@(Mapply a bs) = do
                               rs <- mapM findCF (a : bs)
@@ -204,17 +207,8 @@ findCF self@(Mswitch ta tb) =  do
  
   singleCase :: Term -> UIDState (M.Map Term (Term , Integer , Bool) , Term)
   singleCase t = do
-                    r <- findCF t
-                    let psLets = M.filter (\(a , b , c) -> c) (fst r)
-                        lo = sort $ M.foldrWithKey (\k (a , b , c) l -> (b , a , k) : l) [] psLets
-                        all = lo ++ [(0 , snd r , snd r)] -- last and first term should never be used for r.
-                    rs <- replaceRec all
-                    let bs = createBinds (zip (map fst rs) (map (\(_ , (_ , t , _)) -> t) (init rs)))
-                    -- Return them with false so as to be possibly matched with higher statements.
-                    let nr = M.union (M.fromList $ map (\(_ , (i , t , k)) -> (k , (t , i , False))) (init rs)) (fst r)
-                    pure (nr , case bs of
-                                 [] -> (\(_ , (_ , t , _)) -> t) (last rs)
-                                 _ -> Mlet bs ((\(_ , (_ , t , _)) -> t) (last rs)))
+                    (nr , mr , nt) <- inFilteredLets t (\k (a , b , c) -> c) 
+                    pure (M.union nr mr , nt)
 
 findCF  (Muiop x y t) = do      (tms , nself) <- findCF  t
                                 pure (tms , Muiop x y nself)
@@ -265,19 +259,30 @@ findCF  x = pure (M.empty , x)
 
 
 
+inFilteredLets :: Term -> (Term -> (Term , Integer , Bool) -> Bool)
+              -> UIDState (M.Map Term (Term , Integer , Bool) , M.Map Term (Term , Integer , Bool) , Term)
+inFilteredLets t ff = do
+                  r <- findCF t
+                  let psLets = M.filterWithKey ff (fst r)
+                      lo = sort $ M.foldrWithKey (\k (a , b , c) l -> (b , a , k) : l) [] psLets
+                      all = lo ++ [(0 , snd r , snd r)] -- last and first term should never be used for r.
+                  rs <- replaceRec all
+                  let bs = createBinds (zip (map fst rs) (map (\(_ , (_ , t , _)) -> t) (init rs)))
+                  -- Return them with false so as to be possibly matched with higher statements.
+                  let mr = M.fromList $ map (\(_ , (i , t , k)) -> (k , (t , i , False))) (init rs)
+                      nr = M.difference (fst r) mr
+                  pure (nr , mr , case bs of
+                                    [] -> (\(_ , (_ , t , _)) -> t) (last rs)
+                                    _ -> Mlet bs ((\(_ , (_ , t , _)) -> t) (last rs)))
+
+
+
+
 introduceLets :: Term -> Term
 introduceLets t =
   evalState (do 
-               r <- findCF t
-               -- All the remaining matches are introduced at the top.
-               let psLets = M.filter (\(a , b , c) -> c) (fst r)
-                   lo = sort $ M.foldrWithKey (\k (a , b , c) l -> (b , a , k) : l) [] psLets
-                   all = lo ++ [(0 , snd r , snd r)] -- last and first term should never be used for r.
-               rs <- replaceRec all
-               let bs = createBinds (zip (map fst rs) (map (\(_ , (_ , t , _)) -> t) (init rs)))
-               pure $ case bs of
-                        [] -> (\(_ , (_ , t , _)) -> t) (last rs)
-                        _ -> Mlet bs ((\(_ , (_ , t , _)) -> t) (last rs))
+               (_ , _ , nt) <- inFilteredLets t (\k (a , b , c) -> c)
+               pure nt
             ) (0 , 0)
 
 

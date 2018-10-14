@@ -413,7 +413,7 @@ translateLit l = case l of
   -- TODO Check that this is correct. According to the OCaml spec,
   -- Chars are represented as Ints.
   LitChar _ c -> Mint . CInt . fromEnum $ c
-  _ -> error "unsupported literal type"
+  _ -> errorT "unsupported literal type" 
 
 translatePrim :: TPrim -> Term
 translatePrim tp =
