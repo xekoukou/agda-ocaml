@@ -77,7 +77,8 @@ do
         stack exec runhaskell -- tmp.hs > TheList.agda
         cpp Fold0.agda -Dtail Fold.agda
         sed '/^#/ d' Fold.agda -i
-        stack exec agda-ocaml -- --mlf RedBlack.agda --compilemlf=Malfunction -o RedBlack.mlf > /dev/null
+        stack exec agda-ocaml -- --mlf RedBlack.agda > /dev/null
+	cp RedBlack Malfunction
         stop_spinner $?
 
 
