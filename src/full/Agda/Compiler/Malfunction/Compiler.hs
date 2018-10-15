@@ -24,16 +24,13 @@ module Agda.Compiler.Malfunction.Compiler
   , Arity
   -- * Others
   , qnameNameId
-  , errorT
   , boolT
   , wildcardTerm
   , namedBinding
   , nameToIdent
   , mlfTagRange
-  -- * Primitives
   , compilePrim
   , mkCompilerEnv
-  -- * Malfunction AST
   , module Agda.Compiler.Malfunction.AST
   ) where
 
@@ -53,7 +50,6 @@ import qualified Data.Set as Set
 import           Data.Tuple.Extra (first)
 import           Numeric (showHex)
 import           Data.Char (ord)
-import           GHC.Exts (IsList(..))
 import           Data.Graph
 
 import           Agda.TypeChecking.Monad.Base
@@ -63,7 +59,7 @@ import           Agda.Compiler.ToTreeless
 
 
 import           Agda.Compiler.Malfunction.AST
-import qualified Agda.Compiler.Malfunction.Primitive as Primitive
+import qualified Agda.Compiler.Malfunction.Primitive as Prim
 import           Agda.Compiler.Malfunction.Pragmas
 
 
@@ -288,9 +284,9 @@ translateTerm = \case
       alternatives t = do
           d <- translateTerm deflt
           translateAltsChain t d alts
-  TUnit             -> return Primitive.unitT
-  TSort             -> return Primitive.unitT
-  TErased           -> return Primitive.unitT
+  TUnit             -> return Prim.unitT
+  TSort             -> return Prim.unitT
+  TErased           -> return Prim.unitT
                                     -- TODO: We can probably erase these , but we would have to change 
                                     -- the functions that use them , reduce their arity.
                                     -- For now, we simply pass the unit type.
@@ -299,7 +295,7 @@ translateTerm = \case
 
 -- | We use this when we don't care about the translation.
 wildcardTerm :: Term
-wildcardTerm = errorT "__UNREACHABLE__"
+wildcardTerm = Prim.errorT "__UNREACHABLE__"
 
 
 indexToVarTerm :: MonadReader Env m => Int -> m Term
@@ -413,7 +409,7 @@ translateLit l = case l of
   -- TODO Check that this is correct. According to the OCaml spec,
   -- Chars are represented as Ints.
   LitChar _ c -> Mint . CInt . fromEnum $ c
-  _ -> errorT "unsupported literal type" 
+  _ -> Prim.errorT "unsupported literal type" 
 
 translatePrim :: TPrim -> Term
 translatePrim tp =
@@ -446,7 +442,7 @@ translatePrim tp =
     intbinop typ op = Mlambda ["a" , "b"] $ Mbiop op typ (Mvar "a") (Mvar "b")
     
     -- TODO The RedBlack.agda test gave 3 args in pseq where the last one was unreachable.
-    notSupported = errorT "Not supported by the OCaml backend."
+    notSupported = Prim.errorT "Not supported by the OCaml backend."
     wrong = undefined
 
 
@@ -511,7 +507,7 @@ lookupConRep ns = Map.lookup (qnameNameId ns) <$> asks conMap
 
 
 translateName :: QName -> Term
-translateName qn = Mvar $ nameToIdent qn
+translateName qn = Mvar (nameToIdent qn)
 
 -- | Translate a Treeless name to a valid identifier in Malfunction
 --
@@ -548,10 +544,6 @@ translateBindingPair q t = do
 
 
 
--- | Defines a run-time error in Malfunction - equivalent to @error@ in Haskell.
-errorT :: String -> Term
-errorT err = Mapply (Mglobal (fromList ["Pervasives", "failwith"])) [Mstring err]
-
 -- | Encodes a boolean value as a numerical Malfunction value.
 boolT :: Bool -> Term
 boolT b = Mint (CInt $ boolToInt b)
@@ -573,7 +565,7 @@ compilePrim q s = case x of
                     Just y -> Just (nameToIdent q , y)
                     Nothing -> Nothing
   where
-    x = Map.lookup s Primitive.primitives
+    x = Map.lookup s Prim.primitives
 
 namedBinding :: QName -> Term -> Binding
 namedBinding q t = (`Named`t) $ nameToIdent q

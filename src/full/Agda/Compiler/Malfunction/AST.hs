@@ -34,6 +34,7 @@ module Agda.Compiler.Malfunction.AST
 
 import Prelude hiding ((<>))
 import Data.Int
+import Data.Char
 -- There does exist a definition of a type-class `Pretty` in the package
 -- `pretty` but this is not the one used for Treeless terms, so for consistency,
 -- let's go with Agda's choice.
@@ -380,4 +381,6 @@ instance Pretty IntType where
 
 topModNameToLIdent :: String -> TopLevelModuleName -> String -> Longident
 topModNameToLIdent fc t fn = Longident (Ident fc : g (moduleNameParts t)) where
-  g xs = foldr ((:) . Ident) [Ident fn] xs
+  g xs = foldr ((:) . Ident . fup) [Ident fn] xs
+  fup (x : xs) = toUpper x : xs
+  fup [] = []

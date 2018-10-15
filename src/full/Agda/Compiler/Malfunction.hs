@@ -29,6 +29,7 @@ import qualified Agda.Compiler.Malfunction.Compiler  as Mlf
 import           Agda.Compiler.Malfunction.Optimize
 import           Agda.Compiler.Malfunction.EraseDefs
 import           Agda.Compiler.Malfunction.Pragmas
+import           Agda.Compiler.Malfunction.Primitive
 
 
 
@@ -252,7 +253,7 @@ writeCodeToModule fp = do
                           in case mfc of
                               Just c -> s ++ [((moduleNameParts . toTopLevelModuleName . iModuleName) i , intercalate "\n\n" $ reverse $ map getCode c)]
                               _ -> s ) [] ifs
-  liftIO (fp `writeFile` retCode fcs) where
+  liftIO (fp `writeFile` (primitivesCode ++ (retCode fcs))) where
     getCode (ForeignCode _ code)  = code
     retCode :: [([String] , OCamlCode)] -> String
     retCode g = let mp = Map.fromList g
