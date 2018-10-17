@@ -104,9 +104,8 @@ simpleTests comp = do
   return $ testGroup "simple" $ catMaybes tests'
 
   where compArgs :: Compiler -> AgdaArgs
-        compArgs MAlonzo = ghcArgsAsAgdaArgs ["-itest/"]
-        compArgs JS = []
         compArgs OCaml = []
+        compArgs _ = []
 
 -- The Compiler tests using the standard library are horribly
 -- slow at the moment (1min or more per test case).
@@ -131,25 +130,7 @@ stdlibTests comp = do
 
 
 specialTests :: Compiler -> IO (Maybe TestTree)
-specialTests MAlonzo = do
-  let t = fromJust $
-            agdaRunProgGoldenTest1 testDir MAlonzo (return extraArgs)
-              (testDir </> "ExportTestAgda.agda") defaultOptions cont
-
-  return $ Just $ testGroup "special" [t]
-  where extraArgs = ["-i" ++ testDir, "-itest/", "--no-main", "--ghc-dont-call-ghc"]
-        testDir = "test" </> "Compiler" </> "special"
-        cont compDir out err = do
-            (ret, sout, _) <- PT.readProcessWithExitCode "runghc"
-                    [ "-itest/"
-                    ,"-i" ++ compDir
-                    , testDir </> "ExportTest.hs"
-                    ]
-                    T.empty
-            -- ignore stderr, as there may be some GHC warnings in it
-            return $ ExecutedProg (ret, out <> sout, err)
-specialTests JS = return Nothing
-specialTests OCaml = return Nothing
+specialTests _ = return Nothing
 
 ghcArgsAsAgdaArgs :: GHCArgs -> AgdaArgs
 ghcArgsAsAgdaArgs = map f
@@ -170,10 +151,6 @@ agdaRunProgGoldenTest dir comp extraArgs inp opts =
           -- now run the new program
           let exec = getExecForComp comp compDir inpFile
           case comp of
-            JS -> do
-              setEnv "NODE_PATH" compDir
-              (ret, out', err') <- PT.readProcessWithExitCode "node" [exec] inp'
-              return $ ExecutedProg (ret, out <> out', err <> err')
             _ -> do
               (ret, out', err') <- PT.readProcessWithExitCode exec (runtimeOptions opts) inp'
               return $ ExecutedProg (ret, out <> out', err <> err')
@@ -219,9 +196,8 @@ agdaRunProgGoldenTest1 dir comp extraArgs inp opts cont
           )
 
         argsForComp :: Compiler -> IO [String]
-        argsForComp MAlonzo = return ["--compile"]
-        argsForComp JS = return ["--js"]
         argsForComp OCaml = return ["--mlf"]
+        argsForComp _ = return []
 
         removePaths ps r = case r of
           CompileFailed    r -> CompileFailed    (removePaths' r)
@@ -249,7 +225,6 @@ cleanUpOptions = filter clean
 
 -- gets the generated executable path
 getExecForComp :: Compiler -> FilePath -> FilePath -> FilePath
-getExecForComp JS compDir inpFile = compDir </> ("jAgda." ++ (takeFileName $ dropAgdaOrOtherExtension inpFile) ++ ".js")
 getExecForComp _ compDir inpFile = compDir </> (takeFileName $ dropAgdaOrOtherExtension inpFile)
 
 printExecResult :: ExecResult -> T.Text
