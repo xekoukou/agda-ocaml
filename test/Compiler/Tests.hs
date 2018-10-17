@@ -68,15 +68,15 @@ disabledTests :: [RegexFilter]
 disabledTests =
   [ -- See issue 1528
     RFInclude "Compiler/.*/simple/Sharing"
-  , RFInclude "Compiler/JS/simple/VecReverseIrr"
-  , RFInclude "Compiler/JS/simple/Issue2821"    -- GHC backend specific
-  , RFInclude "Compiler/JS/simple/Issue2914"    -- GHC backend specific
+  , RFInclude "Compiler/OCaml/simple/VecReverseIrr"
+  , RFInclude "Compiler/OCaml/simple/Issue2821"    -- GHC backend specific
+  , RFInclude "Compiler/OCaml/simple/Issue2914"    -- GHC backend specific
     -- Fix to 2524 is too unsafe
   , RFInclude "Compiler/.*/simple/Issue2524"
     -- The following test cases are GHC backend specific.
-  , RFInclude "Compiler/JS/simple/Issue2879-.*"
-  , RFInclude "Compiler/JS/simple/Issue2909-.*"
-  , RFInclude "Compiler/JS/simple/Issue2918"
+  , RFInclude "Compiler/OCaml/simple/Issue2879-.*"
+  , RFInclude "Compiler/OCaml/simple/Issue2909-.*"
+  , RFInclude "Compiler/OCaml/simple/Issue2918"
   ]
 
 tests :: IO TestTree
