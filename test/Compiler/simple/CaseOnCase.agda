@@ -19,6 +19,12 @@ postulate _-_ : Integer → Integer → Integer
 {-# COMPILE UHC _-_ = UHC.Agda.Builtins.primIntegerMinus #-}
 {-# COMPILE JS  _-_ = function(x) { return function(y) { return agdaRTS.uprimIntegerMinus(x, y); }; } #-}
 
+{-# FOREIGN OCaml 
+  let minus x y = x - y
+#-}
+
+{-# COMPILE OCaml _-_ = minus #-}
+
 compareInt : Integer → Integer → Cmp
 compareInt a b with a - b
 ... | pos 0       = equal

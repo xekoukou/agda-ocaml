@@ -576,10 +576,6 @@ namedBinding q t = (`Named`t) $ nameToIdent q
 
 
 handlePragma :: Definition -> TCM (Maybe (Either Definition [(Ident , Term)]))
-handlePragma Defn{defArgInfo = info, defName = q} | isIrrelevant info = do
-  reportSDoc "compile.ghc.definition" 10 $
-           pure $ text "Not compiling" <+> (pretty q <> text ".")
-  pure Nothing
 handlePragma def@Defn{defName = q , defType = ty , theDef = d} = do
   reportSDoc "compile.ghc.definition" 10 $ pure $ vcat
     [ text "Compiling" <+> pretty q <> text ":"
@@ -661,17 +657,18 @@ handleFunctionNoPragma env (Defn{defName = q , theDef = d}) =
 
 
 handleFunction :: Env -> Definition -> TCM [(Ident , Term)]
-handleFunction env def@(Defn{defNoCompilation = noC}) = 
-  case noC of
-    True -> pure []
-    False -> do
-      r <- handlePragma def
-      case r of
-        Nothing -> pure []
-        Just (Right bs) -> pure bs 
-        Just (Left _) -> do
-          b <- handleFunctionNoPragma env def 
-          pure (maybeToList b)
+handleFunction env def@(Defn{defName = q , defArgInfo = info , defNoCompilation = noC}) | (isIrrelevant info || noC) = do
+  reportSDoc "compile.ghc.definition" 10 $
+           pure $ text "Not compiling" <+> (pretty q <> text ".")
+  pure []
+handleFunction env def = do
+  r <- handlePragma def
+  case r of
+    Nothing -> pure []
+    Just (Right bs) -> pure bs 
+    Just (Left _) -> do
+      b <- handleFunctionNoPragma env def 
+      pure (maybeToList b)
 
 
 handleFunctions :: Env -> [Definition] -> TCM [Binding]
