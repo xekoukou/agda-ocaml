@@ -22,6 +22,10 @@ import qualified Data.Map                            as Map
 import           Text.Printf
 import           System.FilePath.Posix
 import           System.Directory
+import           System.Process
+import qualified Control.Exception as E
+import           System.Exit
+import           System.IO
 
 
 import           Agda.Compiler.Malfunction.AST
@@ -30,7 +34,6 @@ import           Agda.Compiler.Malfunction.Optimize
 import           Agda.Compiler.Malfunction.EraseDefs
 import           Agda.Compiler.Malfunction.Pragmas
 import           Agda.Compiler.Malfunction.Primitive
-
 
 
 
@@ -210,10 +213,9 @@ mlfCompile opts modIsMain mods = do
       args_ocaml = "ocamlopt" : "-c" : "-linkpkg" : "-package" : (optOCamlDeps opts) : fcfp : []
       doCall = optCallMLF opts
       ocamlopt = "ocamlfind"
-      mlf = "malfunction"
       exec_path = mdir </> show (nameConcrete outputName)
   callCompiler doCall ocamlopt args_ocaml
-  callCompiler doCall mlf args_mlf
+  callMalfunction doCall mdir args_mlf
   case returnLib of
     True -> pure ()
     False -> do
@@ -286,3 +288,73 @@ byModName bl tab mn mp = let (here , more) = Map.partitionWithKey (\k _ -> lengt
                                       in tab ++ "module " ++ (toUpper fl : cm) ++ " = struct\n\n"
                                          ++ addTab (tab ++ "  ") ((concatMap snd . Map.toList) here) ++ "\n"
                                          ++ s ++ "\n" ++ tab ++ "end\n\n"
+
+
+
+
+
+
+
+
+
+-- Used for malfunction because it requires to be called from the compile dir.
+
+callMalfunction
+  :: Bool
+     -- ^ Should we actually call the compiler
+  -> FilePath
+  -> [String]
+     -- ^ Command-line arguments.
+  -> TCM ()
+callMalfunction doCall compile_dir args =
+  if doCall then do
+    merrors <- callMalfunction' compile_dir args
+    case merrors of
+      Nothing     -> return ()
+      Just errors -> typeError (CompilationError errors)
+  else
+    reportSLn "compile.cmd" 1 $ "NOT calling: " ++ intercalate " " ("malfunction" : args)
+
+-- | Generalisation of @callMalfunction@ where the raised exception is
+-- returned.
+callMalfunction'
+  :: FilePath
+     -- ^ The path to the compiler
+  -> [String]
+     -- ^ Command-line arguments.
+  -> TCM (Maybe String)
+callMalfunction' compile_dir args = do
+  reportSLn "compile.cmd" 1 $ "Calling: " ++ intercalate " " ("malfunction" : args)
+  (_, out, err, p) <-
+    liftIO $ createProcess
+               (shell (intercalate " " ("cd" : compile_dir : "; malfunction" : args)))
+                  { std_err = CreatePipe
+                  , std_out = CreatePipe
+                  }
+
+  -- In -v0 mode we throw away any progress information printed to
+  -- stdout.
+  case out of
+    Nothing  -> _IMPOSSIBLE
+    Just out -> forkTCM $ do
+      -- The handle should be in text mode.
+      liftIO $ hSetBinaryMode out False
+      progressInfo <- liftIO $ hGetContents out
+      mapM_ (reportSLn "compile.output" 1) $ lines progressInfo
+
+  errors <- liftIO $ case err of
+    Nothing  -> _IMPOSSIBLE
+    Just err -> do
+      -- The handle should be in text mode.
+      hSetBinaryMode err False
+      hGetContents err
+
+  exitcode <- liftIO $ do
+    -- Ensure that the output has been read before waiting for the
+    -- process.
+    _ <- E.evaluate (length errors)
+    waitForProcess p
+
+  case exitcode of
+    ExitFailure _ -> return $ Just errors
+    _ -> return Nothing

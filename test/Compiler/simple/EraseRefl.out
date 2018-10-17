@@ -1,0 +1,14 @@
+EXECUTED_PROGRAM
+
+ret > ExitSuccess
+out > EraseRefl.decEq₂ =
+out >   λ _ _ _ _ _ _ _ _ _ _ _ _ _ a b →
+out >     case a of
+out >       EraseRefl.Dec.yes _ →
+out >         case b of
+out >           EraseRefl.Dec.yes _ → EraseRefl.Dec.yes _
+out >           EraseRefl.Dec.no _ → EraseRefl.Dec.no _
+out >       EraseRefl.Dec.no _ → EraseRefl.Dec.no _
+out > EraseRefl.main = Common.IO.putStrLn ""
+out >
+out >

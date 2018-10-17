@@ -8,6 +8,9 @@
 .sw[a-p]
 *.agdai
 *.hi
+*.cmi
+*.cmx
+*.mlf
 *.o
 *.tmp
 *.tmp.*
