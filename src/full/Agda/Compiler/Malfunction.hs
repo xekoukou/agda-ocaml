@@ -98,13 +98,21 @@ backend' = Backend' {
   , preCompile = mlfPreCompile
   , postCompile = mlfCompile
   , preModule = \_ _ fp -> pure $ Recompile fp
-  , compileDef = \_env _menv def -> return def
+  , compileDef = \_env _menv def -> mlfCompileDef def
   , postModule = \_ _ _ _ defs -> pure defs 
   , backendVersion = Just "0.0.1"
   , scopeCheckingSuffices = False
   }
 
-
+-- Create the treeless Term here, so that we use the pragma options of the file
+-- the definition comes from.
+mlfCompileDef :: Definition -> TCM Definition
+mlfCompileDef def@Defn{defName = q} = do
+  case (theDef def) of
+    Function{} -> do toTreeless q
+                     pure ()
+    _ -> pure ()
+  pure def
 
 mlfPreCompile :: MlfOptions -> TCM MlfOptions
 mlfPreCompile mlfOpts = do
