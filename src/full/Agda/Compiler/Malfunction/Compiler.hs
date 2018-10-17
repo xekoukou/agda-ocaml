@@ -657,10 +657,6 @@ handleFunctionNoPragma env (Defn{defName = q , theDef = d}) =
 
 
 handleFunction :: Env -> Definition -> TCM [(Ident , Term)]
-handleFunction env def@(Defn{defName = q , defArgInfo = info , defNoCompilation = noC}) | (isIrrelevant info || noC) = do
-  reportSDoc "compile.ghc.definition" 10 $
-           pure $ text "Not compiling" <+> (pretty q <> text ".")
-  pure []
 handleFunction env def = do
   r <- handlePragma def
   case r of
@@ -676,11 +672,6 @@ handleFunctions env allDefs = do
   let (others , fns) = splitPrim allDefs
   os <- mapM (handleFunction env) others
   let obs = map (\x -> Named (fst x) (snd x)) (concat os)
-  -- GHC does not use this step. We need to ignore all debugging information
-  -- it might produce so as to have the same output as GHC.
---  vrb <- getVerbosity <$> pragmaOptions
---  nprg <- setVerbosity (singleton [] 0) <$> pragmaOptions
---  setPragmaOptions nprg
   qts <- mapM (\x -> do
                   let q = defName x
                   noC <- defNoCompilation <$> getConstInfo q
@@ -689,9 +680,6 @@ handleFunctions env allDefs = do
                     False -> do
                       t <- toTreeless q
                       pure $ maybe Nothing (\rt -> Just (q , rt)) t) fns
---  nprg2 <- setVerbosity vrb <$> pragmaOptions
---  setPragmaOptions nprg2
-  
   let recGrps = dependencyGraph (catMaybes qts)
   tmp <- mapM translateSCC recGrps
   pure $ obs ++ concat tmp           where

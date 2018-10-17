@@ -9,6 +9,7 @@ import           Agda.Utils.Pretty
 import           Agda.Interaction.Options
 import           Agda.Syntax.Concrete.Name (TopLevelModuleName (..))
 
+import           Agda.Syntax.Common (isIrrelevant)
 
 
 
@@ -17,6 +18,7 @@ import           Control.Monad.Extra
 import           Control.Monad.Trans
 import           Data.List
 import           Data.Char
+import           Data.Maybe
 import           Data.Map                            (Map)
 import qualified Data.Map                            as Map
 import           Text.Printf
@@ -88,7 +90,7 @@ ttFlags =
    debugMLF o = pure o{optDebugMLF = True}
   
 -- We do not support separate compilation.
-backend' :: Backend' MlfOptions MlfOptions FilePath [Definition] Definition
+backend' :: Backend' MlfOptions MlfOptions FilePath [Definition] (Maybe Definition)
 backend' = Backend' {
   backendName = "malfunction"
   , options = defOptions
@@ -99,20 +101,25 @@ backend' = Backend' {
   , postCompile = mlfCompile
   , preModule = \_ _ fp -> pure $ Recompile fp
   , compileDef = \_env _menv def -> mlfCompileDef def
-  , postModule = \_ _ _ _ defs -> pure defs 
+  , postModule = \_ _ _ _ defs -> pure $ catMaybes defs 
   , backendVersion = Just "0.0.1"
   , scopeCheckingSuffices = False
   }
 
 -- Create the treeless Term here, so that we use the pragma options of the file
 -- the definition comes from.
-mlfCompileDef :: Definition -> TCM Definition
+mlfCompileDef :: Definition -> TCM (Maybe Definition)
+mlfCompileDef def@(Defn{defName = q , defArgInfo = info , defNoCompilation = noC}) | (isIrrelevant info || noC) = do
+  reportSDoc "compile.ghc.definition" 10 $
+           pure $ text "Not compiling" <+> (pretty q <> text ".")
+  pure Nothing
 mlfCompileDef def@Defn{defName = q} = do
   case (theDef def) of
     Function{} -> do toTreeless q
                      pure ()
     _ -> pure ()
-  pure def
+  pure $ Just def
+
 
 mlfPreCompile :: MlfOptions -> TCM MlfOptions
 mlfPreCompile mlfOpts = do

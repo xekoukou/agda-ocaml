@@ -66,8 +66,9 @@ defaultOptions = TestOptions
 
 disabledTests :: [RegexFilter]
 disabledTests =
-  [ -- See issue 1528
-    RFInclude "Compiler/.*/simple/Sharing"
+  [ -- The Ocaml backend always checks that all postulates have pragmas.
+    RFInclude "Compiler/OCaml/simple/Irrelevant"
+  , RFInclude "Compiler/.*/simple/Sharing" -- See issue 1528
   , RFInclude "Compiler/OCaml/simple/VecReverseIrr"
   , RFInclude "Compiler/OCaml/simple/Issue2821"    -- GHC backend specific
   , RFInclude "Compiler/OCaml/simple/Issue2914"    -- GHC backend specific
