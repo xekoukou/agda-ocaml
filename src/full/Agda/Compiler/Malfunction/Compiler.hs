@@ -307,15 +307,21 @@ indexToVarTerm i = do
 
 
 -- TODO Review this code.
+-- tcase is (Var i)
+-- default is the default case , in case all other fail.
 translateAltsChain :: MonadReader Env m => Term -> Term -> [TAlt] -> m [([Case], Term)]
 translateAltsChain _ defaultt []
   = pure [(defaultCase, defaultt)]
 translateAltsChain tcase defaultt (ta:tas) =
   case ta of
     TALit pat body -> do
-      b <- translateTerm body
-      let c = litToCase pat
-      (([c], b):) <$> go
+      t <- translateTerm body
+      let tgrd = litToCase tcase pat
+      tailAlts <- go
+      return [(defaultCase,
+                Mswitch tgrd
+                [(trueCase, t)
+                , (defaultCase, Mswitch tcase tailAlts)])]
     TACon con arity t -> do
       usedFields <- snd <$> introVars arity
          (Set.map (\ix -> arity - ix - 1) . Set.filter (<arity) <$> usedVars t)
@@ -353,10 +359,10 @@ bindFields vars used termc body = case map bind varsRev of
       | True || Set.member ix used = Named iden (Mfield ix termc)
       | otherwise = Named iden wildcardTerm
 
-litToCase :: Literal -> Case
-litToCase l = case l of
-  LitNat _ i -> CaseInt . fromInteger $ i
-  _          -> error "Unimplemented"
+-- t here is (Var i)
+litToCase :: Term -> Literal -> Term
+litToCase t (LitNat _ i) = Mbiop Eq TBigint t (Mint (CBigint i))
+litToCase t _ = error "Not Implemented"
 
 
 

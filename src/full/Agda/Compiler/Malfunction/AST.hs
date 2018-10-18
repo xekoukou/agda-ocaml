@@ -288,8 +288,8 @@ instance Pretty Term where
     Mglobal li          -> parens $ "global" <+> prettyLongident li
     Mswitch t cexps     -> levelPlus ("switch" <+> pretty t) (map prettyCaseExpression cexps)
     -- Integers
-    Muiop op tp t0    -> pretty op <+> prettyTypedTerm tp t0
-    Mbiop op tp t0 t1 -> levelPlus (pretty op) [prettyTypedTerm tp t0, prettyTypedTerm tp t1]
+    Muiop op tp t0    -> prettyTypedUOp tp op <+> pretty t0
+    Mbiop op tp t0 t1 -> levelPlus (prettyTypedBOp tp op) [pretty t0, pretty t1]
     Mconvert tp0 tp1 t0 -> parens $ "convert" <.> pretty tp0 <.> pretty tp1 <+> pretty t0
     -- Vectors
     Mvecnew _tp t0 t1    -> levelPlus "makevec" [pretty t0, pretty t1]
@@ -336,38 +336,27 @@ instance Pretty Case where
 
 instance Pretty UnaryIntOp where
   pretty op = case op of
-    Neg -> "?.ibig"
-    Not -> "?.ibig"
+    Neg -> "?"
+    Not -> "?"
 
 instance Pretty BinaryIntOp where
   pretty op = case op of
-    Add -> "+.ibig"
-    Sub -> "-.ibig"
-    Mul -> "*.ibig"
-    Div -> "/.ibig"
-    Mod -> "%.ibig"
-    And -> "&.ibig"
-    Or  -> "|.ibig"
-    Xor -> "^.ibig"
-    Lsl -> "<<.ibig"
-    Lsr -> ">>.ibig"
-    Asr -> "a>>.ibig"
-    Lt  -> "<.ibig"
-    Gt  -> ">.ibig"
-    Lte -> "<=.ibig"
-    Gte -> ">=.ibig"
-    Eq  -> "==.ibig"
-
-
-
--- TODO Is this correct?
--- To do this property, we would need to add the type
--- on all the arguments on lambdas.
---- so for the moment , we simply put "".
-prettyTypedTerm :: IntType -> Term -> Doc
-prettyTypedTerm tp t = case tp of
---  TInt -> pretty t
-  _    -> pretty t -- <.> pretty tp
+    Add -> "+"
+    Sub -> "-"
+    Mul -> "*"
+    Div -> "/"
+    Mod -> "%"
+    And -> "&"
+    Or  -> "|"
+    Xor -> "^"
+    Lsl -> "<<"
+    Lsr -> ">>"
+    Asr -> "a>>"
+    Lt  -> "<"
+    Gt  -> ">"
+    Lte -> "<="
+    Gte -> ">="
+    Eq  -> "=="
 
 
 
@@ -377,6 +366,14 @@ instance Pretty IntType where
     TInt32  -> "i32"
     TInt64  -> "i64"
     TBigint -> "ibig"
+
+
+
+prettyTypedUOp :: IntType -> UnaryIntOp -> Doc
+prettyTypedUOp tp op = pretty op <.> pretty tp
+
+prettyTypedBOp :: IntType -> BinaryIntOp -> Doc
+prettyTypedBOp tp op = pretty op <.> pretty tp
 
 
 topModNameToLIdent :: String -> TopLevelModuleName -> String -> Longident

@@ -120,6 +120,8 @@ notMapped s = (s , errorT (s ++ " : is not supported at the moment."))
 (|->) :: a -> b -> (a, b)
 (|->) = (,)
 
+
+-- TODO Incorrect , these primitives actually check to make sure there are no negative Integers.
 binOp :: BinaryIntOp -> Term
 binOp op = Mlambda ["a", "b"] (Mbiop op TBigint (Mvar "a") (Mvar "b"))
 
