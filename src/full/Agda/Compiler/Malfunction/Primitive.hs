@@ -39,10 +39,10 @@ primitives =
   
   -- Natural number functions
   , "primNatPlus"         |-> binOp Add
-  , "primNatMinus"        |-> binOp Sub
+  , "primNatMinus"        |-> primCode "primNatMinus"
   , "primNatTimes"        |-> binOp Mul
-  , "primNatDivSucAux"    |-> binOp Div
-  , "primNatModSucAux"    |-> binOp Mod
+  , "primNatDivSucAux"    |-> primCode "primNatDivSucAux"
+  , "primNatModSucAux"    |-> primCode "primNatModSucAux"
   , "primNatEquality"     |-> binOp Eq
   , "primNatLess"         |-> binOp Lt
 
@@ -167,6 +167,9 @@ primitivesCode = "\
 \  let primNatToChar x = Char.chr (Z.to_int x)\n\
 \  let primToLower x = Char.lowercase_ascii x\n\
 \  let primToUpper x = Char.uppercase_ascii x\n\
+\  let primNatMinus x y = Z.max Z.zero (Z.sub x y)\n\
+\  let primNatDivSucAux k m n j = Z.add k (Z.div (Z.max Z.zero (Z.add n (Z.sub m j))) (Z.add m Z.one))\n\
+\  let primNatModSucAux k m n j = if Z.gt n j then Z.rem (Z.sub n (Z.add j Z.one)) (Z.add m Z.one) else (Z.add k n)\n\
 \\n\
 \\n\
 \end \n\n\n"

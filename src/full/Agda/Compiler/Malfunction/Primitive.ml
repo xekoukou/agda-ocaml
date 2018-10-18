@@ -16,5 +16,7 @@ module Primitives = struct
   let primNatToChar x = Char.chr (Z.to_int x)
   let primToLower x = Char.lowercase_ascii x
   let primToUpper x = Char.uppercase_ascii x
-
+  let primNatMinus x y = Z.max Z.zero (Z.sub x y)
+  let primNatDivSucAux k m n j = Z.add k (Z.div (Z.max Z.zero (Z.add n (Z.sub m j))) (Z.add m Z.one))
+  let primNatModSucAux k m n j = if Z.gt n j then Z.rem (Z.sub n (Z.add j Z.one)) (Z.add m Z.one) else (Z.add k n)
 end
