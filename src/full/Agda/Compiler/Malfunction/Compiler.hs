@@ -24,7 +24,6 @@ module Agda.Compiler.Malfunction.Compiler
   , Arity
   -- * Others
   , qnameNameId
-  , boolT
   , wildcardTerm
   , namedBinding
   , nameToIdent
@@ -278,14 +277,10 @@ translateTerm = \case
 --       True -> pure $ error "caseLazy error."
 --       False -> do
 
-  TCase i _ deflt alts -> do
+  TCase i cinfo deflt alts -> do
       t <- indexToVarTerm i
-      alts' <- alternatives t
-      return $ Mswitch t alts'
-    where
-      alternatives t = do
-          d <- translateTerm deflt
-          translateAltsChain t d alts
+      d <- translateTerm deflt
+      translateTCase t d alts
   TUnit             -> return Prim.unitT
   TSort             -> return Prim.unitT
   TErased           -> return Prim.unitT
@@ -306,23 +301,10 @@ indexToVarTerm i = do
   return (Mvar (ident (ni - i - 1)))
 
 
+
 -- TODO Review this code.
--- tcase is (Var i)
--- default is the default case , in case all other fail.
-translateAltsChain :: MonadReader Env m => Term -> Term -> [TAlt] -> m [([Case], Term)]
-translateAltsChain _ defaultt []
-  = pure [(defaultCase, defaultt)]
-translateAltsChain tcase defaultt (ta:tas) =
-  case ta of
-    TALit pat body -> do
-      t <- translateTerm body
-      let tgrd = litToCase tcase pat
-      tailAlts <- go
-      return [(defaultCase,
-                Mswitch tgrd
-                [(trueCase, t)
-                , (defaultCase, Mswitch tcase tailAlts)])]
-    TACon con arity t -> do
+translateTACon :: MonadReader Env m => Term -> [TAlt] -> m ([TAlt] , [([Case] , Term)])
+translateTACon tcase (TACon con arity t : ts) = do
       usedFields <- snd <$> introVars arity
          (Set.map (\ix -> arity - ix - 1) . Set.filter (<arity) <$> usedVars t)
       (vars, t') <- introVars arity (translateTerm t)
@@ -333,17 +315,47 @@ translateAltsChain tcase defaultt (ta:tas) =
       let cs = case cnr of
                  BlockRep{conTag = tg} -> Tag tg
                  IntRep{conTag = tg} -> CaseInt tg
-      (([cs], bt):) <$> go
-    TAGuard grd t -> do
-      tgrd <- translateTerm grd
-      t' <- translateTerm t
-      tailAlts <- go
-      return [(defaultCase,
-                Mswitch tgrd
-                [(trueCase, t')
-                , (defaultCase, Mswitch tcase tailAlts)])]
-  where
-    go = translateAltsChain tcase defaultt tas
+      (rmalts , rmcs) <- translateTACon tcase ts
+      pure (rmalts , (([cs], bt) : rmcs))
+translateTACon tcase ts = pure (ts , [])
+
+translateTALit :: MonadReader Env m => Term -> TAlt -> m (Term , Term)
+translateTALit tcase (TALit pat body) = do
+      t <- translateTerm body
+      let tgrd = litToCase tcase pat
+      pure (tgrd , t)
+
+translateTAGuard :: MonadReader Env m => TAlt -> m (Term , Term)
+translateTAGuard (TAGuard grd t) = do
+       tgrd <- translateTerm grd
+       tt  <- translateTerm t
+       pure (tgrd , tt)
+
+
+translateLitOrGuard :: MonadReader Env m => Term -> [TAlt] -> m [(Term , Term)]
+translateLitOrGuard tcase (c@(TALit _ _) : ts) = do
+  r <- translateTALit tcase c
+  rs <- translateLitOrGuard tcase ts
+  pure $ r : rs
+translateLitOrGuard tcase (c@(TAGuard _ _) : ts) = do
+  r <- translateTAGuard c
+  rs <- translateLitOrGuard tcase ts
+  pure $ r : rs
+translateLitOrGuard tcase [] = pure []
+translateLitOrGuard tcase ts = error $ "Impossible : " ++ show ts
+
+boolCases :: Term -> [(Term , Term)] -> Term
+boolCases defaultt ((grd , body) : cs) = Mswitch grd [(trueCase , body) , (defaultCase , boolCases defaultt cs)]
+boolCases defaultt [] = defaultt
+
+-- tcase is (Var i)
+-- default is the default case , in case all other fail.
+translateTCase :: MonadReader Env m => Term -> Term -> [TAlt] -> m Term
+translateTCase tcase defaultt tas = do
+  (rmAlts , cs) <-translateTACon tcase tas
+  grdcs <- translateLitOrGuard tcase rmAlts
+  pure $ Mswitch tcase (cs ++ [(defaultCase , boolCases defaultt grdcs)])
+
 
 defaultCase :: [Case]
 defaultCase = [CaseAnyInt, Deftag]
@@ -362,7 +374,9 @@ bindFields vars used termc body = case map bind varsRev of
 -- t here is (Var i)
 litToCase :: Term -> Literal -> Term
 litToCase t (LitNat _ i) = Mbiop Eq TBigint t (Mint (CBigint i))
-litToCase t _ = error "Not Implemented"
+litToCase t (LitChar _ c) = Mbiop Eq TInt t (Mint $ CInt (fromEnum c))
+litToCase t (LitString _ s) = Mapply (Prim.primCode "primStringEquality") [t , Mstring s]
+litToCase _ _ = error "Not Implemented"
 
 
 
@@ -416,7 +430,7 @@ translateLit l = case l of
   LitString _ s -> Mstring s
   -- TODO Check that this is correct. According to the OCaml spec,
   -- Chars are represented as Ints.
-  LitChar _ c -> Mint . CInt . fromEnum $ c
+  LitChar _ c -> Mint $ CInt (fromEnum c)
   _ -> Prim.errorT "unsupported literal type" 
 
 translatePrim :: TPrim -> Term
@@ -551,13 +565,6 @@ translateBindingPair q t = do
   (\t' -> (iden, t')) <$> translateTerm t
 
 
-
--- | Encodes a boolean value as a numerical Malfunction value.
-boolT :: Bool -> Term
-boolT b = Mint (CInt $ boolToInt b)
-
-boolToInt :: Bool -> Int
-boolToInt b = if b then 1 else 0
 
 trueCase :: [Case]
 trueCase = [CaseInt 1]

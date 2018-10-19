@@ -5,6 +5,7 @@ module Agda.Compiler.Malfunction.Primitive
   , unitT
   , primitivesCode
   , errorT
+  , primCode
   ) where
 
 import Data.Map (Map)
@@ -17,13 +18,13 @@ import Agda.Compiler.Malfunction.AST
 primitives :: Map String Term
 primitives =
   -- Integer functions
-  [ "primIntegerPlus"     |-> binOp Add
-  , "primIntegerMinus"    |-> binOp Sub
-  , "primIntegerTimes"    |-> binOp Mul
-  , "primIntegerDiv"      |-> binOp Div
-  , "primIntegerMod"      |-> binOp Mod
-  , "primIntegerEquality" |-> binOp Eq
-  , "primIntegerLess"     |-> binOp Lt
+  [ "primIntegerPlus"     |-> binOp TBigint Add
+  , "primIntegerMinus"    |-> binOp TBigint Sub
+  , "primIntegerTimes"    |-> binOp TBigint Mul
+  , "primIntegerDiv"      |-> binOp TBigint Div
+  , "primIntegerMod"      |-> binOp TBigint Mod
+  , "primIntegerEquality" |-> binOp TBigint Eq
+  , "primIntegerLess"     |-> binOp TBigint Lt
  , notMapped "primIntegerAbs"
  , notMapped "primNatToInteger"
   , "primShowInteger"     |-> Mglobal ["Z", "to_string"]
@@ -38,13 +39,13 @@ primitives =
 
   
   -- Natural number functions
-  , "primNatPlus"         |-> binOp Add
+  , "primNatPlus"         |-> binOp TBigint Add
   , "primNatMinus"        |-> primCode "primNatMinus"
-  , "primNatTimes"        |-> binOp Mul
+  , "primNatTimes"        |-> binOp TBigint Mul
   , "primNatDivSucAux"    |-> primCode "primNatDivSucAux"
   , "primNatModSucAux"    |-> primCode "primNatModSucAux"
-  , "primNatEquality"     |-> binOp Eq
-  , "primNatLess"         |-> binOp Lt
+  , "primNatEquality"     |-> binOp TBigint Eq
+  , "primNatLess"         |-> binOp TBigint Lt
 
 
   -- Floating point functions
@@ -121,10 +122,8 @@ notMapped s = (s , errorT (s ++ " : is not supported at the moment."))
 (|->) = (,)
 
 
--- TODO Incorrect , these primitives actually check to make sure there are no negative Integers.
-binOp :: BinaryIntOp -> Term
-binOp op = Mlambda ["a", "b"] (Mbiop op TBigint (Mvar "a") (Mvar "b"))
-
+binOp :: IntType -> BinaryIntOp -> Term
+binOp tp op = Mlambda ["a", "b"] (Mbiop op tp (Mvar "a") (Mvar "b"))
 
 -- | Defines a run-time error in Malfunction - equivalent to @error@ in Haskell.
 errorT :: String -> Term
@@ -151,7 +150,7 @@ primitivesCode = "\
 \\n\
 \module Primitives = struct \n\
 \\n\
-\  let primCharToNat x = Z.of_int (Char.code x) \n\
+\  let primCharToNat x = Z.of_int x \n\
 \  let primStringToList s = \n\
 \    let rec exp i l =\n\
 \      if i < 0 then l else exp (i - 1) (s.[i] :: l) in\n\
@@ -164,7 +163,7 @@ primitivesCode = "\
 \    imp 0 l;;\n\
 \  let primShowString s = s\n\
 \  let primStringEquality s1 s2 = String.equal s1 s2\n\
-\  let primNatToChar x = Char.chr (Z.to_int x)\n\
+\  let primNatToChar x = Z.to_int x\n\
 \  let primToLower x = Char.lowercase_ascii x\n\
 \  let primToUpper x = Char.uppercase_ascii x\n\
 \  let primNatMinus x y = Z.max Z.zero (Z.sub x y)\n\

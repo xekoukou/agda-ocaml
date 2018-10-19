@@ -1,6 +1,9 @@
 module Primitives = struct
 
-  let primCharToNat x = Z.of_int (Char.code x)
+  (* At the edges of those functions (input, output), types are irrelevant because we use 
+   * flambda. We consider Char to be equal to Int, because they have the same internal representation.  *)
+  
+  let primCharToNat x = Z.of_int x
   let primStringToList s =
     let rec exp i l =
      if i < 0 then l else exp (i - 1) (s.[i] :: l) in
@@ -13,7 +16,7 @@ module Primitives = struct
     imp 0 l;;
   let primShowString s = s
   let primStringEquality s1 s2 = String.equal s1 s2
-  let primNatToChar x = Char.chr (Z.to_int x)
+  let primNatToChar x = Z.to_int x
   let primToLower x = Char.lowercase_ascii x
   let primToUpper x = Char.uppercase_ascii x
   let primNatMinus x y = Z.max Z.zero (Z.sub x y)
