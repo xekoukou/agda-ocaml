@@ -23,6 +23,11 @@ postulate
 {-# COMPILE JS return =
     function(u0) { return function(u1) { return function(x) { return function(cb) { cb(x); }; }; }; } #-}
 
+{-# FOREIGN OCaml
+  let return _ x = x 
+#-}
+{-# COMPILE OCaml return = return #-}
+
 force : Unit → IO Unit
 force unit = return unit
 

@@ -15,6 +15,11 @@ postulate print : Nat → IO ⊤
 {-# COMPILE GHC print = print #-}
 {-# COMPILE JS  print = function (x) { return function(cb) { process.stdout.write(x + "\n"); cb(0) } } #-}
 
+{-# FOREIGN OCaml 
+  let printNat y = print_endline (Z.to_string y)
+#-}
+{-# COMPILE OCaml print = printNat #-}
+
 foo : Unit → IO ⊤
 foo (c _ n _) = print n
 

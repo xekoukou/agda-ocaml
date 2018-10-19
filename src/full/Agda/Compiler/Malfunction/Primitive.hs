@@ -77,7 +77,7 @@ primitives =
   , notMapped "primShowFloat"
 
   -- Character functions
-  , "primCharEquality" |-> |-> binOp TInt Eq
+  , "primCharEquality" |-> binOp TInt Eq
   , notMapped "primIsLower"
   , notMapped "primIsDigit"
   , notMapped "primIsAlpha"
@@ -99,11 +99,7 @@ primitives =
   , "primStringEquality" |-> primCode "primStringEquality"
   , "primShowString" |-> primCode "primShowString"
 
-  -- Other stuff
-  , notMapped "primTrustMe"
-    -- This needs to be force : A → ((x : A) → B x) → B x rather than seq because of call-by-name.
-  , notMapped "primForce"
-  , notMapped "primForceLemma"
+
   , notMapped "primQNameEquality"
   , notMapped "primQNameLess"
   , notMapped "primShowQName"
@@ -111,7 +107,17 @@ primitives =
   , notMapped "primMetaEquality"
   , notMapped "primMetaLess"
   , notMapped "primShowMeta"
-  ]
+
+  
+  -- Other stuff
+  , notMapped "primTrustMe"
+    -- This needs to be force : A → ((x : A) → B x) → B x rather than seq because of call-by-name.
+    -- TODO Check this.
+  , notMapped "primForce"
+--  , "primForce" |-> Mlambda ["a" , "f"] (Mapply (Mvar "f") [(Mvar "a")])
+  , notMapped "primForceLemma"
+  
+   ]
 
 
 

@@ -363,17 +363,17 @@ instance Pretty BinaryIntOp where
 instance Pretty IntType where
   pretty tp = case tp of
     TInt    -> ""
-    TInt32  -> "i32"
-    TInt64  -> "i64"
-    TBigint -> "ibig"
+    TInt32  -> ".i32"
+    TInt64  -> ".i64"
+    TBigint -> ".ibig"
 
 
 
 prettyTypedUOp :: IntType -> UnaryIntOp -> Doc
-prettyTypedUOp tp op = pretty op <.> pretty tp
+prettyTypedUOp tp op = pretty op <> pretty tp
 
 prettyTypedBOp :: IntType -> BinaryIntOp -> Doc
-prettyTypedBOp tp op = pretty op <.> pretty tp
+prettyTypedBOp tp op = pretty op <> pretty tp
 
 
 topModNameToLIdent :: String -> TopLevelModuleName -> String -> Longident
