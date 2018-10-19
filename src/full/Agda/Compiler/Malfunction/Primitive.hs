@@ -77,7 +77,7 @@ primitives =
   , notMapped "primShowFloat"
 
   -- Character functions
-  , notMapped "primCharEquality"
+  , "primCharEquality" |-> |-> binOp TInt Eq
   , notMapped "primIsLower"
   , notMapped "primIsDigit"
   , notMapped "primIsAlpha"
