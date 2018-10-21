@@ -374,8 +374,8 @@ bindFields vars used termc body = case map bind varsRev of
 -- t here is (Var i)
 litToCase :: Term -> Literal -> Term
 litToCase t (LitNat _ i) = Mbiop Eq TBigint t (Mint (CBigint i))
-litToCase t (LitChar _ c) = Mbiop Eq TInt t (Mint $ CInt (fromEnum c))
-litToCase t (LitString _ s) = Mapply (Prim.primCode "primStringEquality") [t , Mstring s]
+litToCase t (LitChar _ c) = Mapply (Prim.primCode "primCharEqual") [t , (Mint $ CInt (fromEnum c))]
+litToCase t (LitString _ s) = Mapply (Prim.primCode "string_equality") [t , Mstring s]
 litToCase _ _ = error "Not Implemented"
 
 

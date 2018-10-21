@@ -65,7 +65,7 @@ defOptions = Opts
   , optMLFLib        = False
   , optCallMLF       = True
   , optDebugMLF      = False
-  , optOCamlDeps     = "zarith"
+  , optOCamlDeps     = "zarith uucp uutf uunf uunf.string"
   }
 
 
@@ -86,7 +86,7 @@ ttFlags =
    enable o = pure o{optMLFCompile = True}
    dontCallMLF o = pure o{optCallMLF = False}
    onlyCMX o = pure o{optMLFLib = True}
-   whichlibs s o = pure o{optOCamlDeps = "zarith" ++ s}
+   whichlibs s o = pure o{optOCamlDeps = "zarith uucp uutf uunf uunf.string" ++ s}
    debugMLF o = pure o{optDebugMLF = True}
   
 -- We do not support separate compilation.
