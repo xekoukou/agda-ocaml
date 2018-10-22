@@ -16,7 +16,7 @@ postulate print : Nat → IO ⊤
 {-# COMPILE JS  print = function (x) { return function(cb) { process.stdout.write(x + "\n"); cb(0) } } #-}
 
 {-# FOREIGN OCaml 
-  let printNat y = print_endline (Z.to_string y)
+  let printNat y world = print_endline (Z.to_string y)
 #-}
 {-# COMPILE OCaml print = printNat #-}
 

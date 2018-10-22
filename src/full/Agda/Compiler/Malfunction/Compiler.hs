@@ -52,6 +52,7 @@ import           Data.Char (ord)
 import           Data.Graph
 
 import           Agda.TypeChecking.Monad.Base
+import           Agda.TypeChecking.Reduce
 import           Agda.TypeChecking.Monad hiding (getVerbosity)
 import           Agda.Interaction.Options.Lenses hiding (setPragmaOptions)
   
@@ -596,7 +597,7 @@ namedBinding q t = (`Named`t) $ nameToIdent q
 
 
 
-handlePragma :: Definition -> TCM (Maybe (Either Definition [(Ident , Term)]))
+handlePragma :: Definition -> TCM (Maybe (Either Definition (Ident , Term)))
 handlePragma def@Defn{defName = q , defType = ty , theDef = d} = do
   reportSDoc "compile.ghc.definition" 10 $ pure $ vcat
     [ text "Compiling" <+> pretty q <> text ":"
@@ -624,7 +625,7 @@ handlePragma def@Defn{defName = q , defType = ty , theDef = d} = do
         let ident = nameToIdent q
             mdn = (toTopLevelModuleName . qnameModule) q
             longIdent = topModNameToLIdent "ForeignCode" mdn oc
-        pure $ Just $ Right [(ident , (Mglobal longIdent))]
+        pure $ Just $ Right (ident , (Mglobal longIdent))
         
 
       -- TODO is this necessary?
@@ -676,23 +677,38 @@ handleFunctionNoPragma env (Defn{defName = q , theDef = d}) =
     _ -> pure $ error "At handleFunction : Case not expected."
         
 
+wIOFunction :: Definition -> (Ident , Term) -> TCM (Ident , Term)
+wIOFunction def self@(id , t) = do
+  Def io _ <- primIO
+  ty <- normalise (defType def)
+  let tv = telView' ty
+  let ln = length (telToList $ theTel $ tv)
+  case (unEl $ theCore tv) of
+    Def d _ | d == io ->   case t of
+                Mlambda ids tt -> case (ln == length ids) of
+                  True -> pure (id , Mlambda (ids ++ [Ident "world"]) (Mapply tt [Mvar (Ident "world")]))
+                  False -> pure (id , Mlambda ids tt)
+                _ -> case ln of
+                  0 -> pure (id , Mlambda [Ident "world"] (Mapply t [Mvar (Ident "world")]))
+                  _ -> pure (id , t)
+    _ -> pure self
 
-handleFunction :: Env -> Definition -> TCM [(Ident , Term)]
+handleFunction :: Env -> Definition -> TCM (Maybe (Ident , Term))
 handleFunction env def = do
   r <- handlePragma def
   case r of
-    Nothing -> pure []
-    Just (Right bs) -> pure bs 
+    Nothing -> pure Nothing
+    Just (Right bs) -> Just <$> wIOFunction def bs 
     Just (Left _) -> do
       b <- handleFunctionNoPragma env def 
-      pure (maybeToList b)
+      maybe (pure Nothing) (\x -> Just <$> wIOFunction def x) b
 
 
 handleFunctions :: Env -> [Definition] -> TCM [Binding]
 handleFunctions env allDefs = do
   let (others , fns) = splitPrim allDefs
   os <- mapM (handleFunction env) others
-  let obs = map (\x -> Named (fst x) (snd x)) (concat os)
+  let obs = map (\x -> Named (fst x) (snd x)) (catMaybes os)
   qts <- mapM (\x -> do
                   let q = defName x
                   noC <- defNoCompilation <$> getConstInfo q
@@ -703,16 +719,18 @@ handleFunctions env allDefs = do
                       pure $ maybe Nothing (\rt -> Just (q , rt)) t) fns
   let recGrps = dependencyGraph (catMaybes qts)
   tmp <- mapM translateSCC recGrps
-  pure $ obs ++ concat tmp           where
+  pure $ obs ++ (catMaybes tmp)           where
     translateSCC scc = case scc of
       AcyclicSCC single -> do
         def <- getConstInfo (fst single)
         rs <- handleFunction env def
-        pure $ map (\x -> Named (fst x) (snd x)) rs
+        pure $ maybe Nothing (\x -> Just $ Named (fst x) (snd x)) rs
       CyclicSCC grp -> do
         defs <- mapM (getConstInfo . fst) grp
         rs <- mapM (handleFunction env) defs
-        pure $ [Recursive (concat rs)]
+        case (catMaybes rs) of
+          [] -> pure Nothing
+          rss -> pure $ Just $ Recursive rss
      -- We handle primitives differently here because
      -- toTreeless fails on primitives.
     splitPrim :: [Definition] -> ([Definition] , [Definition])

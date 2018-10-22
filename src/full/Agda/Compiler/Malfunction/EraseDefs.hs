@@ -73,7 +73,7 @@ eraseB bs = case findMain allIds of
 
   f :: (Ident, Term) -> [Binding]
   f main =
-    (foldr g [] bs) ++ [Named (Ident "main") (snd main)]
+    (foldr g [] bs) ++ [Named (Ident "main") (Mapply (snd main) [unitT])]
     where
     env = M.delete (fst main) (M.fromList allIds)
     allUM = findAllUsedBindings env (snd main)

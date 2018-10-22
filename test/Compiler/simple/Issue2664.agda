@@ -31,7 +31,7 @@ postulate
 {-# COMPILE JS  putStrLn = function(x) { return function(cb) { process.stdout.write(x + "\n"); cb(0); }; } #-}
 
 {-# FOREIGN OCaml 
-  let printEndline y = print_endline y
+  let printEndline y world = print_endline y
 #-}
 {-# COMPILE OCaml putStrLn = printEndline #-}
 

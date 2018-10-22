@@ -29,8 +29,8 @@ postulate
 #-}
 
 {-# FOREIGN OCaml
-  let ioReturn _ _ x = x
-  let ioBind _ _ _ _ x f = f x
+  let ioReturn _ _ x world = x
+  let ioBind _ _ _ _ x f world = f (x world) world
 #-}
 
 {-# COMPILE OCaml return = ioReturn #-}
@@ -49,7 +49,7 @@ postulate
 
 
 {-# FOREIGN OCaml 
-  let printString y = print_string y
+  let printString y world = print_string y
 #-}
 
 {-# COMPILE OCaml putStr = printString #-}
