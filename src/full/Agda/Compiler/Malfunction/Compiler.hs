@@ -62,6 +62,7 @@ import           Agda.Utils.Trie
 import           Agda.Compiler.Malfunction.AST
 import qualified Agda.Compiler.Malfunction.Primitive as Prim
 import           Agda.Compiler.Malfunction.Pragmas
+import           Agda.Compiler.Malfunction.Optimize
 
 
 
@@ -257,6 +258,7 @@ translateTerms env = (`runTranslate` env) . mapM translateM
 translateM :: MonadReader Env m => TTerm -> m Term
 translateM = translateTerm
 
+
 translateTerm :: MonadReader Env m => TTerm -> m Term
 translateTerm = \case
   TVar i            -> indexToVarTerm i
@@ -413,13 +415,21 @@ introVar :: MonadReader Env m => m a -> m (Ident, a)
 introVar ma = first head <$> introVars 1 ma
 
 
+etareduction :: (Term , [Term]) -> Term
+etareduction ((Mlambda ids t) , xs) = hp ids t xs
+  where
+    hp (id : ids) t (x : xs) = hp ids (replaceTr (Mvar id) x t) xs
+    hp [] t (x : xs) = Mapply t (x : xs)
+    hp (id : ids) t [] = Mlambda (id : ids) t
+    hp [] t [] = t
+etareduction (t , xs) = Mapply t xs
 
 translateApp :: MonadReader Env m => TTerm -> [TTerm] -> m Term
 translateApp ft xst =
   do
     f <- translateTerm ft
     xs <- mapM translateTerm xst
-    pure $ Mapply f xs
+    pure $ etareduction (f , xs)
 
 ident :: Int -> Ident
 ident i = Ident $ "v" ++ show i
@@ -428,8 +438,6 @@ translateLit :: Literal -> Term
 translateLit l = case l of
   LitNat _ x -> Mint (CBigint x)
   LitString _ s -> Mstring s
-  -- TODO Check that this is correct. According to the OCaml spec,
-  -- Chars are represented as Ints.
   LitChar _ c -> Mint $ CInt (fromEnum c)
   _ -> Prim.errorT "unsupported literal type" 
 

@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -Wall -Wno-name-shadowing -Wno-unused-matches#-}
-module Agda.Compiler.Malfunction.Optimize (optimizeLetsB) where
+module Agda.Compiler.Malfunction.Optimize (optimizeLetsB , replaceTr) where
 
 import Agda.Compiler.Malfunction.AST
 import Agda.Compiler.Malfunction.EraseDefs
@@ -61,7 +61,10 @@ replaceTr rt ar self@(Mblock x bs) =  caseEq rt ar self $
 replaceTr rt ar self@(Mfield x t) =  caseEq rt ar self $
                                        let nt = replaceTr rt ar t
                                        in Mfield x nt
-replaceTr rt ar x = caseEq rt ar x x
+replaceTr rt ar self@(Mseq ts) = caseEq rt ar self $
+                                   let nts = map (replaceTr rt ar) ts
+                                   in Mseq nts
+replaceTr rt ar self = caseEq rt ar self self
 
 
 replaceTrL :: [(Term , Term)] -> Term -> Term
@@ -174,10 +177,14 @@ lintersect [] = M.empty
 findCF :: Term -> UIDState (M.Map Term (Term , Integer , Bool) , Term)
 findCF self@(Mvar i) = pure (M.empty , self)
 findCF self@(Mlambda ids t) = do
-                 (nr , _ , nself) <- inFilteredLets t (\k (_ , _ , c) -> let ui = findUsedIdents t
+                 (nr , _ , nself) <- inFilteredLets t (\k (_ , _ , c) -> let ui = findUsedIdents k
                                                                              int = intersect ui ids
                                                                          in (not $ null int) && c)
-                 pure (nr , Mlambda ids nself)
+                                     
+                 let nnr = M.filterWithKey (\k (_ , _ , _) -> let ui = findUsedIdents k
+                                                                  int = intersect ui ids
+                                                              in null int) nr
+                 pure (nnr , Mlambda ids nself)
 -- We need to perform findCF on a and bs when we create the let statement.
 findCF self@(Mapply a bs) = do
                               rs <- mapM findCF (a : bs)

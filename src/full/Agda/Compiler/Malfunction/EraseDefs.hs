@@ -3,6 +3,7 @@ module Agda.Compiler.Malfunction.EraseDefs (eraseB , findUsedIdents) where
 
 import Prelude hiding (id)
 import Agda.Compiler.Malfunction.AST
+import Agda.Compiler.Malfunction.Primitive
 import Agda.Compiler.Common
 import Data.List
 import qualified Data.Map.Strict as M
@@ -72,10 +73,10 @@ eraseB bs = case findMain allIds of
 
   f :: (Ident, Term) -> [Binding]
   f main =
-    foldr g [] bs
+    (foldr g [] bs) ++ [Named (Ident "main") (snd main)]
     where
     env = M.delete (fst main) (M.fromList allIds)
-    allUM = M.insert (fst main) (snd main) (findAllUsedBindings env (snd main))
+    allUM = findAllUsedBindings env (snd main)
 
     g :: Binding -> [Binding] -> [Binding]
     g x osum = case x of

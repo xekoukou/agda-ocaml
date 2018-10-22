@@ -30,8 +30,7 @@ postulate
 
 {-# FOREIGN OCaml
   let ioReturn _ _ x = x
-  let ioBind _ _ _ _ x f = let y = (Lazy.force x)
-                           in Lazy.force (f y)
+  let ioBind _ _ _ _ x f = f x
 #-}
 
 {-# COMPILE OCaml return = ioReturn #-}

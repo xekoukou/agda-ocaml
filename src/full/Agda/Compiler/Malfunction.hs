@@ -165,6 +165,7 @@ definitionSummary opts def = when (optDebugMLF opts) $ do
 
 
 -- | Compiles a whole module
+-- | We add a run function that will the one to be executed, if there is a main function.
 mlfMod
   :: [Definition]   -- ^ All visible definitions
   -> TCM (Mod , IsMain)
