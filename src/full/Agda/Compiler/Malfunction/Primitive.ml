@@ -61,7 +61,7 @@ module Primitives = struct
   let primCharToNat x = Z.of_int x
   let primNatToChar x = Z.to_int x
   let primShowChar x = pack [x]
-  let primShowString s = s
+  let primShowString s = "\"" ^ s ^ "\""
 
   let primNatMinus x y = Z.max Z.zero (Z.sub x y)
   let primNatDivSucAux k m n j = Z.add k (Z.div (Z.max Z.zero (Z.add n (Z.sub m j))) (Z.add m Z.one))

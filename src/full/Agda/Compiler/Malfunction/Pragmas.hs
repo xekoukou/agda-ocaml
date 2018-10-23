@@ -43,14 +43,14 @@ data OCamlPragma
 
  -- TODO OCExport should simply define the name of a function that is exported to OCaml.
  -- 'f' is the declaration that will be inserted at .mli .
---   | OCExport Range OCamlCode
---       -- ^ @COMPILE OCaml x as f@
+   | OCExport Range OCamlCode
+      -- ^ @COMPILE OCaml x as f@
   deriving (Show, Eq)
 
 
 instance HasRange OCamlPragma where
   getRange (OCDefn   r _)   = r
---   getRange (OCExport r _) = r
+  getRange (OCExport r _) = r
 
 
 -- Syntax for OCaml pragmas:
@@ -66,7 +66,7 @@ parsePragma (CompilerPragma r s) =
     ps  -> Left $ "Ambiguous parse of pragma '" ++ s ++ "':\n" ++ unlines (map show ps)  -- shouldn't happen
   where
     pragmaP :: ReadP Char OCamlPragma
-    pragmaP = choice [ defnP ] -- choice [ exportP, typeP, dataP, defnP ]
+    pragmaP = choice [ defnP , exportP]
 
     whitespace = many1 (satisfy isSpace)
 
@@ -78,11 +78,6 @@ parsePragma (CompilerPragma r s) =
     -- quite liberal
     isIdent c = isAlphaNum c || elem c "_.':[]"
     isOp c    = not $ isSpace c || elem c "()"
-    ocIdent = fst <$> gather (choice
-                [ string "()"
-                , many1 (satisfy isIdent)
-                , between (char '(') (char ')') (many1 (satisfy isOp))
-                ])
     ocCode  = many1 get -- very liberal
 
     paren = between (skipSpaces *> char '(') (skipSpaces *> char ')')
@@ -91,9 +86,7 @@ parsePragma (CompilerPragma r s) =
       s <- look
       guard $ not $ any (`List.isPrefixOf` s) ["type", "data"]
 
---     exportP = OCExport r <$ wordsP ["as"]        <* whitespace <*> ocIdent <* skipSpaces
---     dataP   = OCData   r <$ wordsP ["=", "data"] <* whitespace <*> ocIdent <*>
---                                                     paren (sepBy (skipSpaces *> ocIdent) barP) <* skipSpaces
+    exportP = OCExport r <$ wordsP ["as"]        <* whitespace <*> ocCode
     defnP = OCDefn r <$ wordsP ["="] <* whitespace <* notTypeOrData <*> ocCode
 
 
@@ -120,11 +113,11 @@ sanityCheckPragma def (Just OCDefn{}) =
     Axiom{}        -> return ()
     Function{}     -> return ()
     AbstractDefn{} -> pure $ throwImpossible (Impossible __FILE__ __LINE__)
-    Datatype{}     -> recOrDataErr "data"
-    Record{}       -> recOrDataErr "record"
     _              -> typeError $ GenericError "OCaml definitions can only be given for postulates and functions."
-    where
-      recOrDataErr which =
-        typeError $ GenericDocError $
-          sep [ text $ "Bad COMPILE OCaml pragma for " ++ which ++ " type. Use"
-              , text "{-# COMPILE OCaml <Name> = data <OCData> (<OCCon1> | .. | <OCConN>) #-}" ]
+sanityCheckPragma def (Just OCExport{}) =
+  case theDef def of
+    Axiom{}        -> return ()
+    Function{}     -> return ()
+    AbstractDefn{} -> pure $ throwImpossible (Impossible __FILE__ __LINE__)
+    _              -> typeError $ GenericError "Only postulates and functions can be exported."
+

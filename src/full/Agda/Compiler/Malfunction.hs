@@ -17,6 +17,7 @@ import           Control.Monad
 import           Control.Monad.Extra
 import           Control.Monad.Trans
 import           Data.List
+import           Data.List.Split
 import           Data.Char
 import           Data.Maybe
 import           Data.Map                            (Map)
@@ -31,7 +32,7 @@ import           System.IO
 
 
 import           Agda.Compiler.Malfunction.AST
-import qualified Agda.Compiler.Malfunction.Compiler  as Mlf
+import qualified Agda.Compiler.Malfunction.Compiler  as C
 import           Agda.Compiler.Malfunction.Optimize
 import           Agda.Compiler.Malfunction.EraseDefs
 import           Agda.Compiler.Malfunction.Pragmas
@@ -52,7 +53,7 @@ backend :: Backend
 backend = Backend backend'
 
 data MlfOptions = Opts
-  { optMLFCompile    :: Bool
+  { optMLF           :: Bool
   , optMLFLib        :: Bool
   , optCallMLF       :: Bool
   , optDebugMLF      :: Bool
@@ -61,11 +62,11 @@ data MlfOptions = Opts
 
 defOptions :: MlfOptions
 defOptions = Opts
-  { optMLFCompile    = False
+  { optMLF           = False
   , optMLFLib        = False
   , optCallMLF       = True
   , optDebugMLF      = False
-  , optOCamlDeps     = "zarith uucp uutf uunf uunf.string"
+  , optOCamlDeps     = "zarith,uucp,uutf,uunf,uunf.string"
   }
 
 
@@ -83,10 +84,10 @@ ttFlags =
     "Generate Debugging Information."
   ]
  where
-   enable o = pure o{optMLFCompile = True}
+   enable o = pure o{optMLF = True}
    dontCallMLF o = pure o{optCallMLF = False}
    onlyCMX o = pure o{optMLFLib = True}
-   whichlibs s o = pure o{optOCamlDeps = "zarith uucp uutf uunf uunf.string" ++ s}
+   whichlibs s o = pure o{optOCamlDeps = optOCamlDeps defOptions ++ s}
    debugMLF o = pure o{optDebugMLF = True}
   
 -- We do not support separate compilation.
@@ -95,7 +96,7 @@ backend' = Backend' {
   backendName = "malfunction"
   , options = defOptions
   , commandLineFlags = ttFlags
-  , isEnabled = optMLFCompile
+  , isEnabled = optMLF
   -- Checks if there are metas and aborts if so.
   , preCompile = mlfPreCompile
   , postCompile = mlfCompile
@@ -136,7 +137,7 @@ definitionSummary opts def = when (optDebugMLF opts) $ do
   liftIO (putStrLn ("Summary for: " ++ show q))
   liftIO $ putStrLn $ unlines [
     show (defName def)
-      ++ "  (" ++ show (Mlf.qnameNameId q)++ "), " ++ defntype
+      ++ "  (" ++ show (C.qnameNameId q)++ "), " ++ defntype
     ]
   case theDef def of
     Function{} ->
@@ -164,16 +165,7 @@ definitionSummary opts def = when (optDebugMLF opts) $ do
 
 
 
--- | Compiles a whole module
--- | We add a run function that will the one to be executed, if there is a main function.
-mlfMod
-  :: [Definition]   -- ^ All visible definitions
-  -> TCM (Mod , IsMain)
-mlfMod allDefs = do
-  bss <- Mlf.compile allDefs
-  let (im , bs) = eraseB bss
-      rbs = optimizeLetsB bs
-  pure (MMod rbs [] , im)
+
   
 
 
@@ -207,21 +199,16 @@ mlfCompile opts modIsMain mods = do
   mapM_ (definitionSummary opts) allDefs
 
   
-  -- Perform the transformation to malfunction
-  im <- compileToMLF allDefs fp
+  let returnLib = optMLFLib opts
+  (mod , exs) <- analyzeCode allDefs returnLib
+  
+  -- Compile to Mlf
+  compileToMLF mod fp
   let fcfp = mdir ++ "/ForeignCode.ml"
+  -- Write Foreign Code.
   writeCodeToModule fcfp
-  let isMain = mappend modIsMain im -- both need to be IsMain
 
   
-  case modIsMain /= isMain of
-    True -> genericError
-               ("No main function defined in " ++ (show . pretty) agdaMod ++ " . Use --no-main to suppress this warning.")
-    False -> pure ()
-
-  let returnLib = case isMain of
-             IsMain -> optMLFLib opts
-             NotMain -> True
   
   -- Perform the Compilation if requested.
 
@@ -231,10 +218,14 @@ mlfCompile opts modIsMain mods = do
       ocamlopt = "ocamlfind"
       exec_path = mdir </> show (nameConcrete outputName)
   callCompiler doCall ocamlopt args_ocaml
-  callMalfunction doCall mdir args_mlf
   case returnLib of
-    True -> pure ()
+    True -> do let mlifp = replaceExtension fp "mli"
+                   args_mli = "ocamlopt" : "-c" : "-linkpkg" : "-package" : (optOCamlDeps opts) : mlifp : []
+               writeMLIFile mlifp exs
+               callCompiler doCall ocamlopt args_mli
+               callMalfunction doCall mdir args_mlf
     False -> do
+      callMalfunction doCall mdir args_mlf
       let fcfpcmx = replaceExtension fcfp "cmx"
           fpcmx = replaceExtension fp "cmx"
           args_focaml = "ocamlopt" : "-o" : exec_path : "-linkpkg" : "-package" : (optOCamlDeps opts) : fcfpcmx : fpcmx : []
@@ -248,16 +239,35 @@ mlfCompile opts modIsMain mods = do
 
 
 
-compileToMLF :: [Definition] -> FilePath -> TCM IsMain
-compileToMLF defs fp = do
-  (modl , im) <- mlfMod defs
-  let modlTxt = prettyShow modl
+
+analyzeCode :: [Definition] -> Bool -> TCM (Mod , [String])
+analyzeCode defs rl = do
+    agdaMod <- curMName
+    (bss , exs) <- C.compile defs
+    let (im , bs) = eraseB bss (if rl then Just (map fst exs) else Nothing)
+    
+    case (im == NotMain) && (not rl) of
+      True -> genericError
+            ("No main function defined in " ++ (show . pretty) agdaMod ++ " .")
+      False -> pure ()
+      
+    let rbs = optimizeLetsB bs
+    pure (MMod rbs (map (Mvar . fst) exs) , map snd exs)
+
+
+
+
+compileToMLF :: Mod -> FilePath -> TCM ()
+compileToMLF mod fp = do
+  let modlTxt = prettyShow mod
   liftIO (fp `writeFile` modlTxt)
-  pure im 
 
 
 
 
+writeMLIFile :: FilePath -> [String] -> TCM ()
+writeMLIFile fp ss = liftIO (fp `writeFile` (intercalate "\n" ss))
+                              
 
 
 

@@ -22,6 +22,7 @@ module Agda.Compiler.Malfunction.Compiler
   , Env(..)
   , ConRep(..)
   , Arity
+  , Export(..)
   -- * Others
   , qnameNameId
   , wildcardTerm
@@ -122,7 +123,7 @@ qnamesIdsInTerm t = go t mempty
 
 
 
-
+type Export = (Ident , String)
 
 
 -- Contains information about constructors that are to be inlined. Some constructors cannot be inlined.
@@ -677,21 +678,28 @@ handleFunctionNoPragma env (Defn{defName = q , theDef = d}) =
     _ -> pure $ error "At handleFunction : Case not expected."
         
 
+-- We add a world token to all IO function as long as they do not return a function.
+-- To check that, we look at the type to find the number of arguments and then we check
+-- at the number of lambdas that the Term has at the start.
+
 wIOFunction :: Definition -> (Ident , Term) -> TCM (Ident , Term)
 wIOFunction def self@(id , t) = do
-  Def io _ <- primIO
-  ty <- normalise (defType def)
-  let tv = telView' ty
-  let ln = length (telToList $ theTel $ tv)
-  case (unEl $ theCore tv) of
-    Def d _ | d == io ->   case t of
-                Mlambda ids tt -> case (ln == length ids) of
-                  True -> pure (id , Mlambda (ids ++ [Ident "world"]) (Mapply tt [Mvar (Ident "world")]))
-                  False -> pure (id , Mlambda ids tt)
-                _ -> case ln of
-                  0 -> pure (id , Mlambda [Ident "world"] (Mapply t [Mvar (Ident "world")]))
-                  _ -> pure (id , t)
-    _ -> pure self
+  mio <- getBuiltin' builtinIO
+  case mio of
+    Nothing -> pure self
+    Just (Def io _) -> do
+      ty <- normalise (defType def)
+      let tv = telView' ty
+      let ln = length (telToList $ theTel $ tv)
+      case (unEl $ theCore tv) of
+        Def d _ | d == io ->   case t of
+                    Mlambda ids tt -> case (ln == length ids) of
+                      True -> pure (id , Mlambda (ids ++ [Ident "world"]) (Mapply tt [Mvar (Ident "world")]))
+                      False -> pure (id , Mlambda ids tt)
+                    _ -> case ln of
+                      0 -> pure (id , Mlambda [Ident "world"] (Mapply t [Mvar (Ident "world")]))
+                      _ -> pure (id , t)
+        _ -> pure self
 
 handleFunction :: Env -> Definition -> TCM (Maybe (Ident , Term))
 handleFunction env def = do
@@ -741,13 +749,23 @@ handleFunctions env allDefs = do
 
 
 
+handleExport :: Definition -> TCM (Maybe Export)
+handleExport def@Defn{defName = q} = do
+  p <- getOCamlPragma q
+  pure $ maybe Nothing (\x -> case x of
+                           (OCExport _ s) -> Just (nameToIdent q , s)
+                           _ -> Nothing) p
+
+
 compile
   :: [Definition]
-  -> TCM [Binding]
+  -> TCM ([Binding] , [Export])
 compile defs = do
   let (dts , others) = split defs
   env <- mkCompilerEnv dts
-  handleFunctions env others where
+  exs <- mapM handleExport others
+  bs <- handleFunctions env others
+  pure (bs , catMaybes exs) where
     split :: [Definition] -> ([Definition] , [Definition])
     split xs = partitionEithers
                $ map (\x -> case theDef x of

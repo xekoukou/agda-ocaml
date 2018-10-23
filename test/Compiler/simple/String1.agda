@@ -1,4 +1,4 @@
-module String where
+module String1 where
 
 open import Common.IO
 open import Common.List

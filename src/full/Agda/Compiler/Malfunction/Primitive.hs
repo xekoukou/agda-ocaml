@@ -216,7 +216,7 @@ primitivesCode = "\n\
 \  let primCharToNat x = Z.of_int x\n\
 \  let primNatToChar x = Z.to_int x\n\
 \  let primShowChar x = pack [x]\n\
-\  let primShowString s = s\n\
+\  let primShowString s = \"\\\"\" ^ s ^ \"\\\"\"\n\
 \\n\
 \  let primNatMinus x y = Z.max Z.zero (Z.sub x y)\n\
 \  let primNatDivSucAux k m n j = Z.add k (Z.div (Z.max Z.zero (Z.add n (Z.sub m j))) (Z.add m Z.one))\n\
