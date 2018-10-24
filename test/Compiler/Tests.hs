@@ -77,6 +77,24 @@ disabledTests =
   , RFInclude "Compiler/OCaml/simple/Issue2879-.*"
   , RFInclude "Compiler/OCaml/simple/Issue2909-.*"
   , RFInclude "Compiler/OCaml/simple/Issue2918"
+
+  -- Temporarily Disabled TODO Enable them.
+  
+  , RFInclude "Compiler/OCaml/simple/Coind"
+  , RFInclude "Compiler/OCaml/simple/CompilingCoinduction"
+  , RFInclude "Compiler/OCaml/simple/CompilingQNamePats"
+  , RFInclude "Compiler/OCaml/simple/CopatternStreamSized"
+  , RFInclude "Compiler/OCaml/simple/Floats"
+  , RFInclude "Compiler/OCaml/simple/FloatsUHCFails"
+  , RFInclude "Compiler/OCaml/simple/Issue1486"
+  , RFInclude "Compiler/OCaml/simple/Issue1664"
+  , RFInclude "Compiler/OCaml/simple/Issue1855"
+  , RFInclude "Compiler/OCaml/simple/Issue2218"
+  , RFInclude "Compiler/OCaml/simple/Issue326"
+  , RFInclude "Compiler/OCaml/simple/Literals"
+  , RFInclude "Compiler/OCaml/simple/QNameOrder"
+  , RFInclude "Compiler/OCaml/simple/Word"
+  
   ]
 
 tests :: IO TestTree

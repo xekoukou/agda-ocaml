@@ -1,3 +1,6 @@
+[![Build Status](https://travis-ci.org/xekoukou/agda-ocaml.svg?branch=master)](https://travis-ci.org/xekoukou/agda-ocaml)
+
+
 Introduction
 ============
 This is an experimental back end for Agda that targets the OCaml compiler.
