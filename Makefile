@@ -33,7 +33,10 @@ stack-install-bin :
 	stack build agda-ocaml:exe:agda-ocaml \
 		--flag Agda:enable-cluster-counting \
 		--no-haddock \
-		--no-library-profiling
+		--no-library-profiling \
+		--stack-yaml stack-lts-12.yaml
+
+
 
 
 .PHONY : stack-install-test
@@ -42,8 +45,8 @@ stack-install-test :
 		--no-run-tests \
 		--flag Agda:enable-cluster-counting \
 		--no-haddock \
-		--no-library-profiling
-
+		--no-library-profiling \
+		--stack-yaml stack-lts-12.yaml
 
 
 # Copy the artefacts built by Stack as if they were build by Cabal.

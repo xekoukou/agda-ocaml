@@ -78,7 +78,7 @@ ttFlags =
     "Do not call the malfunction compiler on the output file"
   , Option [] ["cmx"] (NoArg onlyCMX)
     "Create a .cmx file instead of an executable."
-  , Option [] ["-linkpkg"] (ReqArg whichlibs "pkg1,pkg2")
+  , Option [] ["linkpkg"] (ReqArg whichlibs "pkg1,pkg2")
     "Link the specified packages."
   , Option [] ["d"] (NoArg debugMLF)
     "Generate Debugging Information."
@@ -87,7 +87,7 @@ ttFlags =
    enable o = pure o{optMLF = True}
    dontCallMLF o = pure o{optCallMLF = False}
    onlyCMX o = pure o{optMLFLib = True}
-   whichlibs s o = pure o{optOCamlDeps = optOCamlDeps defOptions ++ s}
+   whichlibs s o = pure o{optOCamlDeps = optOCamlDeps defOptions ++ "," ++ s}
    debugMLF o = pure o{optDebugMLF = True}
   
 -- We do not support separate compilation.

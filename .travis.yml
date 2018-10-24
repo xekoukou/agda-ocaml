@@ -1,0 +1,89 @@
+# Adapted from https://github.com/haskell-CI/haskell-ci
+
+# NB: don't set `language: haskell` here.
+language: c
+
+# Request Ubuntu Trusty (14.04 LTS).
+dist: trusty
+sudo: required
+
+cache:
+  directories:
+  - $HOME/.stack
+
+##############################################################################
+# Tests
+
+matrix:
+  include:
+    - env: BUILD=STACK
+      addons:
+        apt:
+          packages:
+            - curl
+            - m4
+            - libcap-dev
+
+##############################################################################
+before_install:
+
+  - if [[ $BUILD = "STACK" ]]; then
+       mkdir -p ~/.local/bin &&
+       travis_retry curl -L https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack' &&
+       export PATH=$HOME/.local/bin:$PATH &&
+       export PARALLEL_TESTS=2 &&
+       travis_retry echo -e "\n" | sh <(curl -sL https://raw.githubusercontent.com/ocaml/opam/master/shell/install.sh);
+    fi
+
+
+###############################################################################
+
+install:
+  # How much memory we have.
+
+  - ulimit -S -s 5000000
+  - ulimit -S -a
+  - vmstat -s
+
+  # Asking for the shell.
+  - echo $SHELL
+
+
+
+  - if [[ $BUILD = "STACK" ]]; then
+       sh ./install_bwrap.sh;
+    fi
+
+  - if [[ $BUILD = "STACK" ]]; then
+       opam init -y &&
+       opam switch create 4.05.0+flambda &&
+       opam switch 4.05.0+flambda &&
+       eval $(opam env) &&
+       opam install -y ocamlfind &&
+       opam install -y malfunction zarith uutf uunf uucp;
+    fi
+
+
+
+  - if [[ $BUILD = "STACK" ]]; then
+       echo "*** Stack version ***" &&
+       stack --version &&
+       opam --version &&
+       ocaml --version;
+    fi
+
+
+
+  - if [[ $BUILD = "STACK" ]]; then
+       travis_wait 60 make;
+    fi
+
+
+  - if [[ $BUILD = "STACK" ]]; then
+       make AGDA_TESTS_OPTIONS="-j${PARALLEL_TESTS}" compiler-test;
+    fi
+
+
+branches:
+  only:
+    - master
