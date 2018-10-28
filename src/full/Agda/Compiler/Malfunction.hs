@@ -3,7 +3,7 @@ module Agda.Compiler.Malfunction (backend) where
 
 import           Prelude hiding ((<>))
 import           Agda.Compiler.Backend
-import           Agda.Compiler.CallCompiler
+-- import           Agda.Compiler.CallCompiler
 import           Agda.Compiler.Common
 import           Agda.Utils.Pretty
 import           Agda.Interaction.Options
@@ -214,30 +214,30 @@ mlfCompile opts modIsMain mods = do
   let deps = case returnLib of
         True -> optOCamlDeps opts
         False -> optOCamlDeps opts ++ ",lwt.unix"
-  let args_mlf = ["cmx"] ++ [fp]
+  let args_mlf = "malfunction" : "cmx" : fp : []
       fcfpi = replaceExtension fcfp "mli"
-      args_ocamli = "ocamlopt" : "-i" : "-linkpkg" : "-package" : deps : fcfp : ">" : fcfpi : []
---      args_ocamlii = "ocamlopt" : "-c" : "-linkpkg" : "-package" : deps : fcfpi : []
-      args_ocaml = "ocamlopt" : "-c" : "-linkpkg" : "-package" : deps : fcfpi : fcfp : []
+      fcfpci = replaceExtension fcfp "cmi"
+      fcfpc = replaceExtension fcfp "cmx"
+      args_ocamli = "ocamlfind" : "ocamlopt" : "-i" : "-linkpkg" : "-package" : deps : fcfp : ">" : fcfpi : []
+      args_ocamlii = "ocamlfind" : "ocamlopt" : "-c" : "-thread" : "-linkpkg" : "-package" : deps : fcfpi : "-o" : fcfpci : []
+      args_ocaml = "ocamlfind" : "ocamlopt" : "-c" : "-thread" : "-linkpkg" : "-package" : deps : fcfpi : fcfp : "-o" : fcfpc : []
       doCall = optCallMLF opts
-      ocamlopt = "ocamlfind"
       exec_path = mdir </> show (nameConcrete outputName)
-  createMLI doCall mdir args_ocamli
---  callCompiler doCall ocamlopt args_ocamlii
-  callCompiler doCall ocamlopt args_ocaml
+  callCompiler doCall mdir args_ocamli
+  callCompiler doCall mdir args_ocamlii
+  callCompiler doCall mdir args_ocaml
   case returnLib of
     True -> do
       let mlifp = replaceExtension fp "mli"
-          args_mli = "ocamlopt" : "-c" : "-linkpkg" : "-package" : deps : mlifp : []
+          args_mli = "ocamlfind" : "ocamlopt" : "-c" : "-thread" : "-linkpkg" : "-package" : deps : mlifp : []
       writeMLIFile mlifp exs
-      callCompiler doCall ocamlopt args_mli
-      callMalfunction doCall mdir args_mlf
+      callCompiler doCall mdir args_mli
+      callCompiler doCall mdir args_mlf
     False -> do
-      callMalfunction doCall mdir args_mlf
-      let fcfpcmx = replaceExtension fcfp "cmx"
-          fpcmx = replaceExtension fp "cmx"
-          args_focaml = "ocamlopt" : "-o" : exec_path : "-linkpkg" : "-package" : deps : fcfpcmx : fpcmx : []
-      callCompiler doCall ocamlopt args_focaml
+      callCompiler doCall mdir args_mlf
+      let fpcmx = replaceExtension fp "cmx"
+          args_focaml = "ocamlfind" : "ocamlopt" : "-o" : exec_path : "-thread" : "-linkpkg" : "-package" : deps : fcfpc : fpcmx : []
+      callCompiler doCall mdir args_focaml
       
   where
     allDefs :: [Definition]
@@ -331,103 +331,38 @@ byModName bl tab mn mp = let (here , more) = Map.partitionWithKey (\k _ -> lengt
 
 
 
--- TODO These definitions work but they are an ugly hack at the moment.
-
 
 -- Used for malfunction because it requires to be called from the compile dir.
 
-callMalfunction
+callCompiler
   :: Bool
      -- ^ Should we actually call the compiler
   -> FilePath
   -> [String]
      -- ^ Command-line arguments.
   -> TCM ()
-callMalfunction doCall compile_dir args =
+callCompiler doCall compile_dir args =
   if doCall then do
-    merrors <- callMalfunction' compile_dir args
+    merrors <- callCompiler' compile_dir args
     case merrors of
       Nothing     -> return ()
       Just errors -> typeError (CompilationError errors)
   else
     reportSLn "compile.cmd" 1 $ "NOT calling: " ++ intercalate " " ("malfunction" : args)
 
--- | Generalisation of @callMalfunction@ where the raised exception is
+-- | Generalisation of @callCompiler@ where the raised exception is
 -- returned.
-callMalfunction'
+callCompiler'
   :: FilePath
      -- ^ The path to the compiler
   -> [String]
      -- ^ Command-line arguments.
   -> TCM (Maybe String)
-callMalfunction' compile_dir args = do
-  reportSLn "compile.cmd" 1 $ "Calling: " ++ intercalate " " ("malfunction" : args)
+callCompiler' compile_dir args = do
+  reportSLn "compile.cmd" 1 $ "Calling: " ++ intercalate " " args
   (_, out, err, p) <-
     liftIO $ createProcess
-               (shell (intercalate " " ("cd" : compile_dir : "; malfunction" : args)))
-                  { std_err = CreatePipe
-                  , std_out = CreatePipe
-                  }
-
-  -- In -v0 mode we throw away any progress information printed to
-  -- stdout.
-  case out of
-    Nothing  -> _IMPOSSIBLE
-    Just out -> forkTCM $ do
-      -- The handle should be in text mode.
-      liftIO $ hSetBinaryMode out False
-      progressInfo <- liftIO $ hGetContents out
-      mapM_ (reportSLn "compile.output" 1) $ lines progressInfo
-
-  errors <- liftIO $ case err of
-    Nothing  -> _IMPOSSIBLE
-    Just err -> do
-      -- The handle should be in text mode.
-      hSetBinaryMode err False
-      hGetContents err
-
-  exitcode <- liftIO $ do
-    -- Ensure that the output has been read before waiting for the
-    -- process.
-    _ <- E.evaluate (length errors)
-    waitForProcess p
-
-  case exitcode of
-    ExitFailure _ -> return $ Just errors
-    _ -> return Nothing
-
-
-
--- Used for malfunction because it requires to be called from the compile dir.
-
-createMLI
-  :: Bool
-     -- ^ Should we actually call the compiler
-  -> FilePath
-  -> [String]
-     -- ^ Command-line arguments.
-  -> TCM ()
-createMLI doCall compile_dir args =
-  if doCall then do
-    merrors <- createMLI' compile_dir args
-    case merrors of
-      Nothing     -> return ()
-      Just errors -> typeError (CompilationError errors)
-  else
-    reportSLn "compile.cmd" 1 $ "NOT calling: " ++ intercalate " " ("malfunction" : args)
-
--- | Generalisation of @createMLI@ where the raised exception is
--- returned.
-createMLI'
-  :: FilePath
-  -> [String]
-     -- ^ Command-line arguments.
-  -> TCM (Maybe String)
-createMLI' compile_dir args = do
-  reportSLn "compile.cmd" 1 $ "Calling: " ++ intercalate " " ("ocamlfind" : args)
-  (_, out, err, p) <-
-    liftIO $ createProcess
-               (shell (intercalate " " ("cd" : compile_dir : "; ocamlfind" : args)))
+               (shell (intercalate " " ("cd" : compile_dir : "; " : args)))
                   { std_err = CreatePipe
                   , std_out = CreatePipe
                   }

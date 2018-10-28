@@ -24,7 +24,7 @@ postulate
     function(u0) { return function(u1) { return function(x) { return function(cb) { cb(x); }; }; }; } #-}
 
 {-# FOREIGN OCaml
-  let return _ x world = x 
+  let return _ x world = Lwt.return x 
 #-}
 {-# COMPILE OCaml return = return #-}
 
