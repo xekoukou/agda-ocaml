@@ -66,7 +66,7 @@ defOptions = Opts
   , optMLFLib        = False
   , optCallMLF       = True
   , optDebugMLF      = False
-  , optOCamlDeps     = "zarith,uucp,uutf,uunf,uunf.string"
+  , optOCamlDeps     = "zarith,uucp,uutf,uunf,uunf.string,lwt"
   }
 
 
@@ -206,29 +206,37 @@ mlfCompile opts modIsMain mods = do
   compileToMLF mod fp
   let fcfp = mdir ++ "/ForeignCode.ml"
   -- Write Foreign Code.
-  writeCodeToModule fcfp
+  writeCodeToModule returnLib fcfp
 
   
   
   -- Perform the Compilation if requested.
-
+  let deps = case returnLib of
+        True -> optOCamlDeps opts
+        False -> optOCamlDeps opts ++ ",lwt.unix"
   let args_mlf = ["cmx"] ++ [fp]
-      args_ocaml = "ocamlopt" : "-c" : "-linkpkg" : "-package" : (optOCamlDeps opts) : fcfp : []
+      fcfpi = replaceExtension fcfp "mli"
+      args_ocamli = "ocamlopt" : "-i" : "-linkpkg" : "-package" : deps : fcfp : ">" : fcfpi : []
+--      args_ocamlii = "ocamlopt" : "-c" : "-linkpkg" : "-package" : deps : fcfpi : []
+      args_ocaml = "ocamlopt" : "-c" : "-linkpkg" : "-package" : deps : fcfpi : fcfp : []
       doCall = optCallMLF opts
       ocamlopt = "ocamlfind"
       exec_path = mdir </> show (nameConcrete outputName)
+  createMLI doCall mdir args_ocamli
+--  callCompiler doCall ocamlopt args_ocamlii
   callCompiler doCall ocamlopt args_ocaml
   case returnLib of
-    True -> do let mlifp = replaceExtension fp "mli"
-                   args_mli = "ocamlopt" : "-c" : "-linkpkg" : "-package" : (optOCamlDeps opts) : mlifp : []
-               writeMLIFile mlifp exs
-               callCompiler doCall ocamlopt args_mli
-               callMalfunction doCall mdir args_mlf
+    True -> do
+      let mlifp = replaceExtension fp "mli"
+          args_mli = "ocamlopt" : "-c" : "-linkpkg" : "-package" : deps : mlifp : []
+      writeMLIFile mlifp exs
+      callCompiler doCall ocamlopt args_mli
+      callMalfunction doCall mdir args_mlf
     False -> do
       callMalfunction doCall mdir args_mlf
       let fcfpcmx = replaceExtension fcfp "cmx"
           fpcmx = replaceExtension fp "cmx"
-          args_focaml = "ocamlopt" : "-o" : exec_path : "-linkpkg" : "-package" : (optOCamlDeps opts) : fcfpcmx : fpcmx : []
+          args_focaml = "ocamlopt" : "-o" : exec_path : "-linkpkg" : "-package" : deps : fcfpcmx : fpcmx : []
       callCompiler doCall ocamlopt args_focaml
       
   where
@@ -274,14 +282,17 @@ writeMLIFile fp ss = liftIO (fp `writeFile` (intercalate "\n" ss))
 
 
 
-writeCodeToModule :: FilePath -> TCM ()
-writeCodeToModule fp = do
+writeCodeToModule :: Bool -> FilePath -> TCM ()
+writeCodeToModule isLib fp = do
+  let adCode = case isLib of
+        True -> ""
+        False -> "let main_run = Lwt_main.run\n\n"
   ifs <- map miInterface . Map.elems <$> getVisitedModules
   let fcs = foldr (\i s-> let mfc = (Map.lookup "OCaml" . iForeignCode) i
                           in case mfc of
                               Just c -> s ++ [((moduleNameParts . toTopLevelModuleName . iModuleName) i , intercalate "\n\n" $ reverse $ map getCode c)]
                               _ -> s ) [] ifs
-  liftIO (fp `writeFile` (primitivesCode ++ (retCode fcs))) where
+  liftIO (fp `writeFile` (adCode ++ primitivesCode ++ (retCode fcs))) where
     getCode (ForeignCode _ code)  = code
     retCode :: [([String] , OCamlCode)] -> String
     retCode g = let mp = Map.fromList g
@@ -320,7 +331,7 @@ byModName bl tab mn mp = let (here , more) = Map.partitionWithKey (\k _ -> lengt
 
 
 
-
+-- TODO These definitions work but they are an ugly hack at the moment.
 
 
 -- Used for malfunction because it requires to be called from the compile dir.
@@ -384,3 +395,69 @@ callMalfunction' compile_dir args = do
   case exitcode of
     ExitFailure _ -> return $ Just errors
     _ -> return Nothing
+
+
+
+-- Used for malfunction because it requires to be called from the compile dir.
+
+createMLI
+  :: Bool
+     -- ^ Should we actually call the compiler
+  -> FilePath
+  -> [String]
+     -- ^ Command-line arguments.
+  -> TCM ()
+createMLI doCall compile_dir args =
+  if doCall then do
+    merrors <- createMLI' compile_dir args
+    case merrors of
+      Nothing     -> return ()
+      Just errors -> typeError (CompilationError errors)
+  else
+    reportSLn "compile.cmd" 1 $ "NOT calling: " ++ intercalate " " ("malfunction" : args)
+
+-- | Generalisation of @createMLI@ where the raised exception is
+-- returned.
+createMLI'
+  :: FilePath
+  -> [String]
+     -- ^ Command-line arguments.
+  -> TCM (Maybe String)
+createMLI' compile_dir args = do
+  reportSLn "compile.cmd" 1 $ "Calling: " ++ intercalate " " ("ocamlfind" : args)
+  (_, out, err, p) <-
+    liftIO $ createProcess
+               (shell (intercalate " " ("cd" : compile_dir : "; ocamlfind" : args)))
+                  { std_err = CreatePipe
+                  , std_out = CreatePipe
+                  }
+
+  -- In -v0 mode we throw away any progress information printed to
+  -- stdout.
+  case out of
+    Nothing  -> _IMPOSSIBLE
+    Just out -> forkTCM $ do
+      -- The handle should be in text mode.
+      liftIO $ hSetBinaryMode out False
+      progressInfo <- liftIO $ hGetContents out
+      mapM_ (reportSLn "compile.output" 1) $ lines progressInfo
+
+  errors <- liftIO $ case err of
+    Nothing  -> _IMPOSSIBLE
+    Just err -> do
+      -- The handle should be in text mode.
+      hSetBinaryMode err False
+      hGetContents err
+
+  exitcode <- liftIO $ do
+    -- Ensure that the output has been read before waiting for the
+    -- process.
+    _ <- E.evaluate (length errors)
+    waitForProcess p
+
+  case exitcode of
+    ExitFailure _ -> return $ Just errors
+    _ -> return Nothing
+
+
+

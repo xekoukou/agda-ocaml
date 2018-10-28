@@ -28,9 +28,10 @@ postulate
   }; }; }; }
 #-}
 
+
 {-# FOREIGN OCaml
-  let ioReturn _ _ x world = x
-  let ioBind _ _ _ _ x f world = f (x world) world
+  let ioReturn _ _ x world = Lwt.return x
+  let ioBind _ _ _ _ x f world = Lwt.bind (x world) (fun x -> f x world)
 #-}
 
 {-# COMPILE OCaml return = ioReturn #-}
@@ -49,7 +50,7 @@ postulate
 
 
 {-# FOREIGN OCaml 
-  let printString y world = print_string y
+  let printString y world = Lwt.return (print_string y)
 #-}
 
 {-# COMPILE OCaml putStr = printString #-}

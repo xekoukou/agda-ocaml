@@ -85,10 +85,11 @@ eraseB bs Nothing =
   case findMain allIds of
     Just main ->
       let ubs = initFAU main allIds
-      in (IsMain , (foldr (orderB ubs) [] bs) ++ [Named (Ident "main") (Mapply (snd main) [unitT])])
+      in (IsMain , (foldr (orderB ubs) [] bs) ++ [Named (Ident "main") (Mapply (Mglobal run) [Mapply (snd main) [unitT]])])
     -- We return nothing because we will throw an error.
     Nothing -> (NotMain , [])
   where
+  run = Longident [(Ident "ForeignCode") , (Ident "main_run")]
   allIds = findAllIdents bs
 
 
