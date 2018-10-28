@@ -56,7 +56,7 @@ install:
        opam switch 4.05.0+flambda &&
        eval $(opam env) &&
        opam install -y ocamlfind &&
-       opam install -y malfunction zarith uutf uunf uucp;
+       opam install -y malfunction zarith-freestanding uutf uunf uucp lwt;
     fi
 
 
