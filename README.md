@@ -8,31 +8,35 @@ This is an experimental back end for Agda that targets the OCaml compiler.
 The purpose of the project is to increase the performance of compiled
 Agda programs:
 
-<p style="text-align: center;">
- <img alt="CPU Benchmark"    src="assets/cpu.png"    width="400" />
- <img alt="Memory Benchmark" src="assets/memory.png" width="400" />
-</p>
 
-This repo is a mirror (and a branch off of) the repo that was used
-during development. The original repo can be found here:
 
-    https://gitlab.com/janmasrovira/agda2mlf
+Requirements
+============
 
-The major difference is the project structure. And the above repo also
-contains a report we wrote for the project.
+```OCaml 4.0.5.0+flambda``` can be installed with ```opam```
 
-Project structure
-=================
-The project layout is designed to mirror suitable locations in `agda`.
+```
+opam switch create 4.0.5.0+flambda
+opam switch 4.0.5.0+flambda
+```
+
+opam packages:
+```
+malfunction zarith-freestanding uutf uunf uucp lwt
+```
+
+```uunf``` has an installion bug that requires the increase of stack memory for it to install :
+
+```
+ulimit -S -s Big_Number
+```
+
+The ```stack``` package manager is also required to perform the installation.
 
 Building
 ========
-You need to install `malfunction` to get up and running. Please refer
-to [malfunction] to see how to get this on your system.
 
-This project has been tested using `stack`. Building should be as easy as:
-
-    ln -s stack-8.0.2.yaml stack.yaml
+    ln -s stack-*.yaml stack.yaml
     stack build
 
 ### Installing
@@ -41,16 +45,193 @@ This project has been tested using `stack`. Building should be as easy as:
 
 ### Testing
 
-    stack test
+    make
+    make test
 
-### Benchmarking
+### Initial Benchmark Results
 
-    stack bench
 
-The benchmarks depend on [agda-prelude] - so download that and add it
-to your default libraries.  You also need to install the `time` and
-`gnuplot` package in the Debian OS.
+<p style="text-align: center;">
+ <img alt="CPU Benchmark"    src="assets/cpu.png"    width="400" />
+ <img alt="Memory Benchmark" src="assets/memory.png" width="400" />
+</p>
 
+
+### Limitations
+
+Currently , there is no support for Coinduction , float types or the reflection primitives.
+
+
+
+### Usage
+
+#### CommandLine
+
+Compiling a program :
+
+```
+agda-ocaml --mlf mainFile.agda
+```
+
+Creating an OCaml library :
+
+```
+agda-ocaml --mlf --cmx File.agda
+```
+
+
+
+#### Pragmas
+
+This backend has the same internal representation as OCaml itself. This means that all OCaml algebraic data types can be easily expressed in Agda.
+The important thing to remember is that the order of the agda constructors must follow the order of the OCaml type.
+Also , the arity of the constructors must be the same as the OCaml type.
+
+
+
+ex:
+
+```agda
+
+module ll where
+
+
+open import Agda.Builtin.Unit public renaming (⊤ to Unit; tt to unit)
+open import Agda.Builtin.IO public
+open import Agda.Builtin.Nat public
+  using    ( Nat; zero; suc)
+
+
+open import Agda.Builtin.Int public renaming (Int to Integer)
+open import Agda.Builtin.String public
+
+intToString : Integer → String
+intToString = primShowInteger
+
+showN : Nat -> String
+showN n = intToString (pos n)
+
+
+
+postulate
+  return  : ∀ {a} {A : Set a} → A → IO A
+  _>>=_   : ∀ {a b} {A : Set a} {B : Set b} → IO A → (A → IO B) → IO B
+
+{-# FOREIGN OCaml
+  let ioReturn _ _ x world = Lwt.return x
+  let ioBind _ _ _ _ x f world = Lwt.bind (x world) (fun x -> f x world)
+#-}
+
+{-# COMPILE OCaml return = ioReturn #-}
+{-# COMPILE OCaml _>>=_ = ioBind #-}
+
+postulate
+  putStr     : String -> IO Unit
+
+{-# FOREIGN OCaml 
+  let printString y world = Lwt.return (print_string y)
+#-}
+
+{-# COMPILE OCaml putStr = printString #-}
+
+putStrLn   : String -> IO Unit
+putStrLn s = putStr s >>= \_ -> putStr "\n"
+
+
+{-# FOREIGN OCaml
+
+type foo =
+  | Int of Z.t
+  | Nothing
+  | Pair of Z.t * Z.t
+  | Boring;;
+
+let fok = Int (Z.of_int 34)
+let no = Nothing
+let bo = Boring
+let bol = Pair (Z.of_int 22 , Z.of_int 73)
+
+#-}
+
+
+
+data foo : Set where
+  int : Nat → foo
+  nothing : foo
+  pair : Nat → Nat → foo
+  boring : foo
+  
+
+postulate
+  fok : foo
+  bol : foo
+  no  : foo
+  bo  : foo
+
+{-# COMPILE OCaml fok = fok #-}
+{-# COMPILE OCaml bol = bol #-}
+{-# COMPILE OCaml no = no #-}
+{-# COMPILE OCaml bo = bo #-}
+
+
+fun : foo -> String
+fun (int x) = showN (suc x)
+fun nothing = "nothing"
+fun boring = "boring"
+fun (pair x x₁) = showN x₁
+
+main : IO Unit
+main = 
+  putStrLn (fun fok) >>= (\_ ->
+  putStrLn (fun bol) >>= (\_ ->
+  putStrLn (fun no) >>= (\_ ->
+  putStrLn (fun bo))))
+
+
+
+```
+
+#### IO translation
+
+Currently , to avoid having ```IO``` be executed at the point of definition, a ```world``` argument is passed
+to all functions that return ```IO A``` and it is applied to the result of that function.
+
+I am personally going to use the lwt library for IO as can be seen in the previous example.
+
+#### Exporting To OCaml
+
+To export a function or data to OCaml, you use the export pragma.
+You need to specify the OCaml type this function translates into.
+
+ex. :
+
+```
+module BB where
+
+open import Agda.Builtin.String public
+
+
+
+str : String
+str = "Hello from Agda."
+
+
+{-# COMPILE OCaml str as val str : string #-}
+```
+
+A cmx file is created , called ```BB.cmx```.
+If we had imported OCaml into Agda, a ```ForeignCode.cmx``` would be created as well.
+
+To access ```str``` from OCaml file ```s.ml``` :
+
+```OCaml
+let () = print_string BB.str
+```
+
+then you compile both in the familiar way :
+
+```
+ocamlfind ocamlopt -thread -linkpkg -package zarith,uunf,uunf.string,uutf,uucp,lwt ForeignCode.cmx BB.cmx s.ml
+```
 
 [malfunction]: https://github.com/stedolan/malfunction
-[agda-prelude]: https://github.com/UlfNorell/agda-prelude
