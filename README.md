@@ -201,7 +201,8 @@ You need to specify the OCaml type this function translates into.
 
 ex. :
 
-```
+```agda
+
 module BB where
 
 open import Agda.Builtin.String public
