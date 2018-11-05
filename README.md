@@ -1,17 +1,14 @@
 [![Build Status](https://travis-ci.org/xekoukou/agda-ocaml.svg?branch=master)](https://travis-ci.org/xekoukou/agda-ocaml)
 
 
-Introduction
-============
+## Introduction
+
 This is an experimental back end for Agda that targets the OCaml compiler.
 
-The purpose of the project is to increase the performance of compiled
-Agda programs:
 
 
+## Requirements
 
-Requirements
-============
 
 ```OCaml 4.0.5.0+flambda``` can be installed with ```opam```
 
@@ -33,22 +30,21 @@ ulimit -S -s Big_Number
 
 The ```stack``` package manager is also required to perform the installation.
 
-Building
-========
+## Building
 
     ln -s stack-*.yaml stack.yaml
     stack build
 
-### Installing
+## Installing
 
     stack install agda-ocaml
 
-### Testing
+## Testing
 
     make
     make test
 
-### Initial Benchmark Results
+## Initial Benchmark Results
 
 
 <p style="text-align: center;">
@@ -57,15 +53,15 @@ Building
 </p>
 
 
-### Limitations
+## Limitations
 
 Currently , there is no support for Coinduction , float types or the reflection primitives.
 
 
 
-### Usage
+## Usage
 
-#### CommandLine
+### CommandLine
 
 Compiling a program :
 
@@ -81,7 +77,7 @@ agda-ocaml --mlf --cmx File.agda
 
 
 
-#### Pragmas
+### Pragmas
 
 This backend has the same internal representation as OCaml itself. This means that all OCaml algebraic data types can be easily expressed in Agda.
 The important thing to remember is that the order of the agda constructors must follow the order of the OCaml type.
@@ -191,14 +187,14 @@ main =
 
 ```
 
-#### IO translation
+### IO translation
 
 Currently , to avoid having ```IO``` be executed at the point of definition, a ```world``` argument is passed
 to all functions that return ```IO A``` and it is applied to the result of that function.
 
 I am personally going to use the lwt library for IO as can be seen in the previous example.
 
-#### Exporting To OCaml
+### Exporting To OCaml
 
 To export a function or data to OCaml, you use the export pragma.
 You need to specify the OCaml type this function translates into.
@@ -218,9 +214,12 @@ str = "Hello from Agda."
 
 {-# COMPILE OCaml str as val str : string #-}
 ```
+then execute :
 
-A cmx file is created , called ```BB.cmx```.
-If we had imported OCaml into Agda, a ```ForeignCode.cmx``` would be created as well.
+```
+agda-ocaml --mlf --cmx BB.agda
+```
+A cmx file is created , called ```BB.cmx``` as well as ```ForeignCode.cmx``` , for the code that is imported into Agda.
 
 To access ```str``` from OCaml file ```s.ml``` :
 
