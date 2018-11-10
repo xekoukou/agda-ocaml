@@ -647,8 +647,10 @@ handlePragma def@Defn{defName = q , defType = ty , theDef = d} = do
         case tl of
             Just _ ->  pure Nothing
             _    -> case pragma of
-                       Nothing -> genericError
-                           $ "Error : There are postulates that have not been defined : " ++ prettyShow q
+                       Nothing -> do
+                         genericWarning
+                           $ fwords $ "Warning : There are postulates that have not been defined : " ++ prettyShow q
+                         pure Nothing
                        _ -> error "IMPOSSIBLE"
 
       Datatype{} -> error $ "Please Report it as a bug."

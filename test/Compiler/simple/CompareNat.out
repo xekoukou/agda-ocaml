@@ -29,6 +29,8 @@ out >     () () _ _ (Common.IO.putStrLn (CompareNat.compare-lots 1500 2000))
 out >     (Common.IO.then
 out >        () () _ _ (Common.IO.putStrLn (CompareNat.compare-lots 2000 1500))
 out >        (Common.IO.putStrLn (CompareNat.compare-lots 2000 2000)))
+out > Warning : There are postulates that have not been defined :
+out > Agda.Builtin.TrustMe.unsafePrimTrustMe
 out > less-less
 out > greater-greater
 out > equal-equal

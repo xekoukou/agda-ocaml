@@ -10,5 +10,7 @@ out >           EraseRefl.Dec.yes _ → EraseRefl.Dec.yes _
 out >           EraseRefl.Dec.no _ → EraseRefl.Dec.no _
 out >       EraseRefl.Dec.no _ → EraseRefl.Dec.no _
 out > EraseRefl.main = Common.IO.putStrLn ""
+out > Warning : There are postulates that have not been defined :
+out > Agda.Builtin.TrustMe.unsafePrimTrustMe
 out >
 out >

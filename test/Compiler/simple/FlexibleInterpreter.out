@@ -1,4 +1,6 @@
 EXECUTED_PROGRAM
 
 ret > ExitSuccess
+out > Warning : There are postulates that have not been defined :
+out > Agda.Builtin.TrustMe.unsafePrimTrustMe
 out > 1
