@@ -607,7 +607,6 @@ handlePragma def@Defn{defName = q , defType = ty , theDef = d} = do
   pragma <- getOCamlPragma q
   minf   <- getBuiltinName builtinInf
   mflat  <- getBuiltinName builtinFlat
-  mlevel <- getBuiltinName builtinLevel
   
   case d of
        -- TODO is this necessary? Probably yes.
@@ -632,10 +631,6 @@ handlePragma def@Defn{defName = q , defType = ty , theDef = d} = do
       -- TODO is this necessary?
       -- Compiling Inf
       _ | Just q == minf -> genericError "Inf is not supported at the moment."
-
-
-      -- Level is ignored . We compile it to Unit.
-      _ | Just q == mlevel -> pure Nothing
 
 
       Axiom{} -> do
