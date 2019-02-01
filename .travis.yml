@@ -5,6 +5,7 @@ sudo: required
 cache:
   directories:
   - $HOME/.stack
+  - $HOME/.opam
 
 ##############################################################################
 # Tests
@@ -51,7 +52,7 @@ install:
     fi
 
   - if [[ $BUILD = "STACK" ]]; then
-       opam init -y &&
+       opam init --bare -y &&
        opam switch create 4.05.0+flambda &&
        opam switch 4.05.0+flambda &&
        eval $(opam env) &&
