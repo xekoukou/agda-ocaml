@@ -40,9 +40,6 @@ import           Agda.Compiler.Malfunction.Primitive
 
 
 
---TODO Remove
-import Debug.Trace
-
 
 -- TODO Replace it with throwimpossible.
 _IMPOSSIBLE :: a
@@ -116,7 +113,7 @@ mlfCompileDef def@(Defn{defName = q , defArgInfo = info , defNoCompilation = noC
   pure Nothing
 mlfCompileDef def@Defn{defName = q} = do
   case (theDef def) of
-    Function{} -> do toTreeless q
+    Function{} -> do toTreeless EagerEvaluation q
                      pure ()
     _ -> pure ()
   pure $ Just def
@@ -141,7 +138,7 @@ definitionSummary opts def = when (optDebugMLF opts) $ do
     ]
   case theDef def of
     Function{} ->
-      whenJustM (toTreeless q) $
+      whenJustM (toTreeless EagerEvaluation q) $
         \tt ->
           liftIO . putStrLn . render
           $  header '=' (show q)

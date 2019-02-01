@@ -669,7 +669,7 @@ handleFunctionNoPragma env (Defn{defName = q , theDef = d}) =
 -- TODO Handle the case where it is delayed.
            Delayed -> error $ "Delayed is set to True for function name :" ++ prettyShow q
            NotDelayed -> do
-              mt <- toTreeless q
+              mt <- toTreeless EagerEvaluation q
               pure $ maybe Nothing (\t -> Just $ runTranslate (translateBindingPair q t) env) mt
     Primitive{primName = s} -> pure $ compilePrim q s
     _ -> pure $ error "At handleFunction : Case not expected."
@@ -720,7 +720,7 @@ handleFunctions env allDefs = do
                   case noC of
                     True -> pure Nothing
                     False -> do
-                      t <- toTreeless q
+                      t <- toTreeless EagerEvaluation q
                       pure $ maybe Nothing (\rt -> Just (q , rt)) t) fns
   let recGrps = dependencyGraph (catMaybes qts)
   tmp <- mapM translateSCC recGrps
