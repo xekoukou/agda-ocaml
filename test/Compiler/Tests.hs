@@ -77,7 +77,9 @@ disabledTests =
   , RFInclude "Compiler/OCaml/simple/Issue2879-.*"
   , RFInclude "Compiler/OCaml/simple/Issue2909-.*"
   , RFInclude "Compiler/OCaml/simple/Issue2918"
-
+    -- Segfaulting 2640 behaves differently on travis
+  , RFInclude "Compiler/.*/simple/Erasure-Issue2640"
+  
   -- Temporarily Disabled TODO Enable them.
   
   , RFInclude "Compiler/OCaml/simple/Coind"
