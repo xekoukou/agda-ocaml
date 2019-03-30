@@ -10,11 +10,11 @@ This is an experimental back end for Agda that targets the OCaml compiler.
 ## Requirements
 
 
-```OCaml 4.0.5.0+flambda``` can be installed with ```opam```
+```OCaml 4.05.0+flambda``` can be installed with ```opam```
 
 ```
-opam switch create 4.0.5.0+flambda
-opam switch 4.0.5.0+flambda
+opam switch create 4.05.0+flambda
+opam switch 4.05.0+flambda
 ```
 
 opam packages:
