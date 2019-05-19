@@ -10,22 +10,16 @@ This is an experimental back end for Agda that targets the OCaml compiler.
 ## Requirements
 
 
-```OCaml 4.0.5.0+flambda``` can be installed with ```opam```
+```OCaml 4.0.7.0+flambda``` can be installed with ```opam```
 
 ```
-opam switch create 4.0.5.0+flambda
-opam switch 4.0.5.0+flambda
+opam switch create 4.0.7.0+flambda
+opam switch 4.0.7.0+flambda
 ```
 
 opam packages:
 ```
-malfunction zarith-freestanding uutf uunf uucp lwt
-```
-
-```uunf``` has an installion bug that requires the increase of stack memory for it to install :
-
-```
-ulimit -S -s Big_Number
+malfunction.0.3 zarith-freestanding uutf uunf uucp lwt
 ```
 
 The ```stack``` package manager is also required to perform the installation.
@@ -42,7 +36,7 @@ The ```stack``` package manager is also required to perform the installation.
 ## Testing
 
     make
-    make test
+    make compiler-test
 
 ## Initial Benchmark Results
 

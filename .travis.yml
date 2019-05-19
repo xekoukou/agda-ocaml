@@ -52,11 +52,12 @@ install:
 
   - if [[ $BUILD = "STACK" ]]; then
        opam init --bare -y &&
-       opam switch create 4.05.0+flambda &&
-       opam switch 4.05.0+flambda &&
+       opam switch create 4.07.0+flambda &&
+       opam switch 4.07.0+flambda &&
        eval $(opam env) &&
        opam install -y ocamlfind &&
-       opam install -y malfunction zarith-freestanding uutf uunf uucp lwt;
+       opam install -y malfunction.0.3
+       opam install -y zarith-freestanding uutf uunf uucp lwt;
     fi
 
 
@@ -71,7 +72,7 @@ install:
 
 
   - if [[ $BUILD = "STACK" ]]; then
-       travis_wait 60 make;
+       travis_wait 120 make;
     fi
 
 script:
