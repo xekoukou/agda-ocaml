@@ -601,7 +601,7 @@ namedBinding q t = (`Named`t) $ nameToIdent q
 handlePragma :: Definition -> TCM (Maybe (Either Definition (Ident , Term)))
 handlePragma def@Defn{defName = q , defType = ty , theDef = d} = do
   reportSDoc "compile.ghc.definition" 10 $ pure $ vcat
-    [ text "Compiling" <+> pretty q <> text ":"
+    [ text "Compiling" <+> (pretty q <> text ":")
     , nest 2 $ text (show d)
     ]
   pragma <- getOCamlPragma q

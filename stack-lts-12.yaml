@@ -6,7 +6,7 @@ packages:
 extra-deps:
   - tasty-1.1.0.4
   - git: https://github.com/agda/agda.git
-    commit: 'f5fb43467f6dd42a69f42a9ee7b9150a17300f2c'
+    commit: '64218e5358343dd9bc76bf7deba860e611f15933'
 
 flags: {}
 

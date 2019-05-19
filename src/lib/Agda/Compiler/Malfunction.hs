@@ -1,10 +1,10 @@
 {-# OPTIONS_GHC -Wall -Wno-name-shadowing #-}
-module Agda.Compiler.Malfunction (backend) where
+module Agda.Compiler.Malfunction (malfunction) where
 
 import           Prelude hiding ((<>))
 import           Agda.Compiler.Backend
--- import           Agda.Compiler.CallCompiler
 import           Agda.Compiler.Common
+import           Agda.Main (runAgda)
 import           Agda.Utils.Pretty
 import           Agda.Interaction.Options
 import           Agda.Syntax.Concrete.Name (TopLevelModuleName (..))
@@ -97,11 +97,12 @@ backend' = Backend' {
   -- Checks if there are metas and aborts if so.
   , preCompile = mlfPreCompile
   , postCompile = mlfCompile
-  , preModule = \_ _ fp -> pure $ Recompile fp
-  , compileDef = \_env _menv def -> mlfCompileDef def
+  , preModule = \_ _ _ fp -> pure $ Recompile fp
+  , compileDef = \_ _ _ def -> mlfCompileDef def
   , postModule = \_ _ _ _ defs -> pure $ catMaybes defs 
   , backendVersion = Just "0.0.1"
   , scopeCheckingSuffices = False
+  , mayEraseType = const $ return True
   }
 
 -- Create the treeless Term here, so that we use the pragma options of the file
@@ -393,3 +394,8 @@ callCompiler' compile_dir args = do
 
 
 
+
+
+-- | Invokes the agda-compiler with the additional malfunction backend.
+malfunction :: IO ()
+malfunction = runAgda [backend]

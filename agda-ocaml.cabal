@@ -12,16 +12,20 @@ build-type:          Simple
 extra-source-files:  README.md
 cabal-version:       >=1.10
 
+source-repository head
+  type:     git
+  location: git@github.com:xekoukou/agda-ocaml.git
+
+
+
 library
-  hs-source-dirs:      src/full
-  exposed-modules:     Agda.Compiler.Malfunction.AST
-                     , Agda.Compiler.Malfunction.Run
+  hs-source-dirs:      src/lib
+  exposed-modules:     Agda.Compiler.Malfunction
+  other-modules:       Agda.Compiler.Malfunction.AST
                      , Agda.Compiler.Malfunction.Compiler
                      , Agda.Compiler.Malfunction.EraseDefs
                      , Agda.Compiler.Malfunction.Optimize
-                     , Agda.Compiler.Malfunction.Main
                      , Agda.Compiler.Malfunction.Pragmas
-                     , Agda.Compiler.Malfunction
                      , Agda.Compiler.Malfunction.Primitive
                      , Agda.Compiler.Malfunction.Instances
   build-depends:       Agda       >= 2.6.0
@@ -37,8 +41,7 @@ library
                      , directory  == 1.3.*
                      , split      == 0.2.3.3
   default-language:    Haskell2010
-
-  extensions:
+  default-extensions:
     NamedWildCards
     TypeSynonymInstances
     FlexibleInstances
@@ -59,34 +62,12 @@ library
 
 
 executable agda-ocaml
-  hs-source-dirs:      app
+  hs-source-dirs:      src/agda-ocaml
   main-is:             Main.hs
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   build-depends:       base
                      , agda-ocaml
   default-language:    Haskell2010
-
-
-benchmark agda-ocaml-bench
-  type:               exitcode-stdio-1.0
-  hs-source-dirs:     benchmark/agda-ocaml
-  other-modules:      RedBlack
-                    , Typed
-                    , TypedExist
-                    , Untyped
-                    , AgdaListGen
-  main-is:            Main.hs
-  build-depends:
-                       base
-                     , directory == 1.3.*
-                     , process    >= 1.4 && < 1.6.4
-  default-language:    Haskell2010
-
-
-source-repository head
-  type:     git
-  location: git@github.com:agda/agda-ocaml.git
-
 
 
 
@@ -148,6 +129,8 @@ test-suite agda-ocaml-tests
                      , TypeSynonymInstances
                      , TupleSections
 
+
+
   -- Initially, we disable all the warnings.
   ghc-options: -threaded
                -w
@@ -194,3 +177,20 @@ test-suite agda-ocaml-tests
     ghc-options: -Wcpp-undef
                  -Wsimplifiable-class-constraints
                  -Wunbanged-strict-patterns
+
+-- 
+-- benchmark agda-ocaml-bench
+--   type:               exitcode-stdio-1.0
+--   hs-source-dirs:     benchmark/agda-ocaml
+--   other-modules:      RedBlack
+--                     , Typed
+--                     , TypedExist
+--                     , Untyped
+--                     , AgdaListGen
+--   main-is:            Main.hs
+--   build-depends:
+--                        base
+--                      , directory == 1.3.*
+--                      , process    >= 1.4 && < 1.6.4
+--   default-language:    Haskell2010
+-- 

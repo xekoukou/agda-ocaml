@@ -332,7 +332,7 @@ instance Pretty Case where
     Tag n           -> "(tag " <> pretty n <> ")"
     CaseAnyInt      -> "_"
     CaseInt n       -> pretty n
-    Intrange (i, j) -> "(" <> pretty i <+> pretty j <> ")"
+    Intrange (i, j) -> ("(" <> pretty i) <+> (pretty j <> ")")
 
 instance Pretty UnaryIntOp where
   pretty op = case op of
