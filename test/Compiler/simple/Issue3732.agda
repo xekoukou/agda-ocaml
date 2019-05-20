@@ -2,6 +2,9 @@ open import Common.IO
 open import Common.Unit
 open import Common.String
 
+-- Currently, it is not actually a test.
+-- I need a wat to check that Erasure does not happen when it normally would.
+
 {-# FOREIGN OCaml 
 
 type i = 

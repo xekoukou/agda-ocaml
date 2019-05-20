@@ -88,7 +88,7 @@ parsePragma (CompilerPragma r s) =
       guard $ not $ any (`List.isPrefixOf` s) ["type", "data"]
 
     exportP = OCExport r <$ wordsP ["as"] <* whitespace <*> ocCode
-    defnP = OCDefn r <$ wordsP ["="] <* whitespace <*> ocCode
+    defnP = OCDefn r <$ wordsP ["="] <* whitespace <* notTypeOrData <*> ocCode
     noErasureP = OCNoErasure r <$ wordsP ["No-Erasure"] <*> skipSpaces
 
 
