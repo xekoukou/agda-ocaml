@@ -40,7 +40,7 @@ data OCamlPragma
       --  ^ @COMPILE OCaml x = <code>@
       -- Important : We do not check that types correspond to the pragma.
       -- It could lead to undefined behaviors, crashes and all the other goodies.
-
+   | OCNoErasure Range ()
  -- TODO OCExport should simply define the name of a function that is exported to OCaml.
  -- 'f' is the declaration that will be inserted at .mli .
    | OCExport Range OCamlCode
@@ -51,6 +51,7 @@ data OCamlPragma
 instance HasRange OCamlPragma where
   getRange (OCDefn   r _)   = r
   getRange (OCExport r _) = r
+  getRange (OCNoErasure r _) = r
 
 
 -- Syntax for OCaml pragmas:
@@ -66,7 +67,7 @@ parsePragma (CompilerPragma r s) =
     ps  -> Left $ "Ambiguous parse of pragma '" ++ s ++ "':\n" ++ unlines (map show ps)  -- shouldn't happen
   where
     pragmaP :: ReadP Char OCamlPragma
-    pragmaP = choice [ defnP , exportP]
+    pragmaP = choice [defnP , noErasureP , exportP]
 
     whitespace = many1 (satisfy isSpace)
 
@@ -86,9 +87,9 @@ parsePragma (CompilerPragma r s) =
       s <- look
       guard $ not $ any (`List.isPrefixOf` s) ["type", "data"]
 
-    exportP = OCExport r <$ wordsP ["as"]        <* whitespace <*> ocCode
-    defnP = OCDefn r <$ wordsP ["="] <* whitespace <* notTypeOrData <*> ocCode
-
+    exportP = OCExport r <$ wordsP ["as"] <* whitespace <*> ocCode
+    defnP = OCDefn r <$ wordsP ["="] <* whitespace <*> ocCode
+    noErasureP = OCNoErasure r <$ wordsP ["No-Erasure"] <*> skipSpaces
 
 
 parseOCamlPragma :: CompilerPragma -> TCM OCamlPragma
@@ -112,12 +113,19 @@ sanityCheckPragma def (Just OCDefn{}) =
   case theDef def of
     Axiom{}        -> return ()
     Function{}     -> return ()
-    AbstractDefn{} -> pure $ throwImpossible (Impossible __FILE__ __LINE__)
+    AbstractDefn{} -> __IMPOSSIBLE__
     _              -> typeError $ GenericError "OCaml definitions can only be given for postulates and functions."
 sanityCheckPragma def (Just OCExport{}) =
   case theDef def of
     Axiom{}        -> return ()
     Function{}     -> return ()
-    AbstractDefn{} -> pure $ throwImpossible (Impossible __FILE__ __LINE__)
+    AbstractDefn{} -> __IMPOSSIBLE__
     _              -> typeError $ GenericError "Only postulates and functions can be exported."
+sanityCheckPragma def (Just OCNoErasure{}) =
+  case theDef def of
+    Function{}     -> return ()
+    Datatype{}     -> return ()
+    Record{}       -> return ()
+    AbstractDefn{} -> __IMPOSSIBLE__
+    _              -> typeError $ GenericError "Only datatypes, records and functions accept the NoErasure pragma."
 

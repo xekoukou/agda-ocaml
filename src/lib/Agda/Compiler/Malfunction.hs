@@ -6,6 +6,7 @@ import           Agda.Compiler.Backend
 import           Agda.Compiler.Common
 import           Agda.Main (runAgda)
 import           Agda.Utils.Pretty
+import           Agda.Utils.Impossible
 import           Agda.Interaction.Options
 import           Agda.Syntax.Concrete.Name (TopLevelModuleName (..))
 
@@ -39,11 +40,8 @@ import           Agda.Compiler.Malfunction.Pragmas
 import           Agda.Compiler.Malfunction.Primitive
 
 
+import           Debug.Trace
 
-
--- TODO Replace it with throwimpossible.
-_IMPOSSIBLE :: a
-_IMPOSSIBLE = error "IMPOSSIBLE"
 
 
 backend :: Backend
@@ -102,8 +100,18 @@ backend' = Backend' {
   , postModule = \_ _ _ _ defs -> pure $ catMaybes defs 
   , backendVersion = Just "0.0.1"
   , scopeCheckingSuffices = False
-  , mayEraseType = const $ return True
+  , mayEraseType = ocamlMayEraseType
   }
+
+
+ocamlMayEraseType :: QName -> TCM Bool
+ocamlMayEraseType q = do
+  pragma <- getOCamlPragma q
+  case q of
+    _ | Just OCNoErasure{} <- pragma -> pure $ False
+    _                                -> pure $ True
+
+
 
 -- Create the treeless Term here, so that we use the pragma options of the file
 -- the definition comes from.
@@ -368,7 +376,7 @@ callCompiler' compile_dir args = do
   -- In -v0 mode we throw away any progress information printed to
   -- stdout.
   case out of
-    Nothing  -> _IMPOSSIBLE
+    Nothing  -> __IMPOSSIBLE__
     Just out -> forkTCM $ do
       -- The handle should be in text mode.
       liftIO $ hSetBinaryMode out False
@@ -376,7 +384,7 @@ callCompiler' compile_dir args = do
       mapM_ (reportSLn "compile.output" 1) $ lines progressInfo
 
   errors <- liftIO $ case err of
-    Nothing  -> _IMPOSSIBLE
+    Nothing  -> __IMPOSSIBLE__
     Just err -> do
       -- The handle should be in text mode.
       hSetBinaryMode err False
