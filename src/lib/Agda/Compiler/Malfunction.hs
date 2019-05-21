@@ -40,8 +40,6 @@ import           Agda.Compiler.Malfunction.Pragmas
 import           Agda.Compiler.Malfunction.Primitive
 
 
-import           Debug.Trace
-
 
 
 backend :: Backend

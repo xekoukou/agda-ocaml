@@ -22,7 +22,7 @@ module Agda.Compiler.Malfunction.Compiler
   , Env(..)
   , ConRep(..)
   , Arity
-  , Export(..)
+  , Export
   -- * Others
   , qnameNameId
   , wildcardTerm
@@ -34,9 +34,11 @@ module Agda.Compiler.Malfunction.Compiler
   , module Agda.Compiler.Malfunction.AST
   ) where
 
-import           Agda.Syntax.Common (NameId(..) , Delayed(..) , isIrrelevant)
+import           Agda.Syntax.Common (NameId(..) , Delayed(..) , Induction(..))
 import           Agda.Syntax.Literal
 import           Agda.Syntax.Treeless
+
+import           Agda.Utils.Impossible
 
 import           Data.List.Extra (intercalate)
 import           Control.Monad.Reader
@@ -44,7 +46,7 @@ import           Data.Ix (inRange, rangeSize)
 import           Data.Map (Map)
 import           Data.Either
 import qualified Data.Map as Map
-import           Data.Maybe (mapMaybe , fromMaybe , maybeToList , catMaybes)
+import           Data.Maybe (mapMaybe , fromMaybe , catMaybes)
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.Tuple.Extra (first)
@@ -55,25 +57,14 @@ import           Data.Graph
 import           Agda.TypeChecking.Monad.Base
 import           Agda.TypeChecking.Reduce
 import           Agda.TypeChecking.Monad hiding (getVerbosity)
-import           Agda.Interaction.Options.Lenses hiding (setPragmaOptions)
   
 import           Agda.Compiler.ToTreeless
-import           Agda.Utils.Trie
 
 
 import           Agda.Compiler.Malfunction.AST
 import qualified Agda.Compiler.Malfunction.Primitive as Prim
 import           Agda.Compiler.Malfunction.Pragmas
 import           Agda.Compiler.Malfunction.Optimize
-
-
-
---TODO Remove
-import Debug.Trace
-
-
-
-
 
 
 
@@ -138,9 +129,11 @@ data ConRep =
     BlockRep
   { conTag    :: Int
   , conArity' :: Int
+  , conInd'   :: Induction
   }
   | IntRep
-    { conTag :: Int }
+    { conTag :: Int
+    , conInd' :: Induction }
             deriving (Show)
 
 type Arity = Int
@@ -197,36 +190,33 @@ getConstrNms = mapMaybe (getCons . theDef)
     getCons _            = Nothing
 
 
-getConstrInfo :: [[QName]] -> TCM [[(QName , Arity)]]
+getConstrInfo :: [[QName]] -> TCM [[(QName , (Arity , Induction))]]
 getConstrInfo allcons
   | any ((>rangeSize mlfTagRange) . length) allcons = error "too many constructors"
-  | otherwise = withArity allcons
+  | otherwise = mapM (mapM (\q -> (q,) <$> infoQName q)) allcons
 
 
--- | Creates a mapping for all the constructors in the array. The constructors
--- should reference the same data-type.
-withArity :: [[QName]] -> TCM [[(QName, Int)]]
-withArity = mapM (mapM (\q -> (q,) <$> arityQName q))
-
--- | If the qnames references a constructor the arity of that constructor is returned.
-arityQName :: QName -> TCM Int
-arityQName q = f . theDef <$> getConstInfo q
+-- | If the qnames references a constructor the arity and induction property of that constructor is returned.
+infoQName :: QName -> TCM (Int , Induction)
+infoQName q = f . theDef <$> getConstInfo q
   where
     f def = case def of
-      Constructor{} -> conArity def
-      _             -> error "Not a constructor :("
+      Constructor{} -> (conArity def , conInd def)
+      _             -> __IMPOSSIBLE__
 
 
 
-mkCompilerEnv' :: [[(QName, Arity)]] -> Env
+
+
+mkCompilerEnv' :: [[(QName, (Arity , Induction))]] -> Env
 mkCompilerEnv' consByDtype = Env {
   conMap = conMap
   , level = 0
   }
   where
-    singleDt :: Int -> Int -> [(QName , Arity)] -> [(NameId , ConRep)]
-    singleDt ci vi ((q , 0) : ms) = (qnameNameId q , IntRep {conTag = ci}) : singleDt (ci + 1) vi ms
-    singleDt ci vi ((q , a) : ms) = (qnameNameId q , BlockRep {conTag = vi , conArity' = a}) : singleDt ci (vi + 1) ms
+    singleDt :: Int -> Int -> [(QName , (Arity , Induction))] -> [(NameId , ConRep)]
+    singleDt ci vi ((q , (0 , ind)) : ms) = (qnameNameId q , IntRep {conTag = ci , conInd' = ind}) : singleDt (ci + 1) vi ms
+    singleDt ci vi ((q , (a , ind)) : ms) = (qnameNameId q , BlockRep {conTag = vi , conArity' = a , conInd' = ind}) : singleDt ci (vi + 1) ms
     singleDt _ _ [] = []
     
     conMap = Map.fromList (concatMap (singleDt 0 0) consByDtype)
@@ -307,33 +297,41 @@ indexToVarTerm i = do
 
 
 -- TODO Review this code.
-translateTACon :: MonadReader Env m => Term -> [TAlt] -> m ([TAlt] , [([Case] , Term)])
+translateTACon :: MonadReader Env m => Term -> [TAlt] -> m ([TAlt] , ([([Case] , Term)] , Induction))
 translateTACon tcase (TACon con arity t : ts) = do
       usedFields <- snd <$> introVars arity
          (Set.map (\ix -> arity - ix - 1) . Set.filter (<arity) <$> usedVars t)
       (vars, t') <- introVars arity (translateTerm t)
-      let bt = bindFields vars usedFields tcase t'
-      -- TODO: It is not clear how to deal with bindings in a pattern
-      
+
       cnr <- askConRep con
-      let cs = case cnr of
-                 BlockRep{conTag = tg} -> Tag tg
-                 IntRep{conTag = tg} -> CaseInt tg
-      (rmalts , rmcs) <- translateTACon tcase ts
-      pure (rmalts , (([cs], bt) : rmcs))
-translateTACon tcase ts = pure (ts , [])
+      let (cs , ind) = case cnr of
+                         BlockRep{conTag = tg , conInd' = ind'} -> (Tag tg , ind')
+                         IntRep{conTag = tg , conInd' = ind'}   -> (CaseInt tg , ind')
+
+      -- TODO: It is not clear how to deal with bindings in a pattern
+      (rmalts , (rmcs , ind2)) <- translateTACon tcase ts
+      
+      let aind = allInd ind ind2
+      
+      let bt = bindFields vars usedFields tcase t' aind
+      pure (rmalts , ((([cs], bt) : rmcs) , aind))      where
+        allInd Inductive Inductive = Inductive
+        allInd _ _ = CoInductive
+translateTACon _ ts = pure (ts , ([] , Inductive))
 
 translateTALit :: MonadReader Env m => Term -> TAlt -> m (Term , Term)
 translateTALit tcase (TALit pat body) = do
       t <- translateTerm body
       let tgrd = litToCase tcase pat
       pure (tgrd , t)
+translateTALit _ _ = __IMPOSSIBLE__
 
 translateTAGuard :: MonadReader Env m => TAlt -> m (Term , Term)
 translateTAGuard (TAGuard grd t) = do
        tgrd <- translateTerm grd
        tt  <- translateTerm t
        pure (tgrd , tt)
+translateTAGuard _ = __IMPOSSIBLE__
 
 
 translateLitOrGuard :: MonadReader Env m => Term -> [TAlt] -> m [(Term , Term)]
@@ -345,8 +343,8 @@ translateLitOrGuard tcase (c@(TAGuard _ _) : ts) = do
   r <- translateTAGuard c
   rs <- translateLitOrGuard tcase ts
   pure $ r : rs
-translateLitOrGuard tcase [] = pure []
-translateLitOrGuard tcase ts = error $ "Impossible : " ++ show ts
+translateLitOrGuard _ [] = pure []
+translateLitOrGuard _ _ = __IMPOSSIBLE__
 
 boolCases :: Term -> [(Term , Term)] -> Term
 boolCases defaultt ((grd , body) : cs) = Mswitch grd [(trueCase , body) , (defaultCase , boolCases defaultt cs)]
@@ -356,23 +354,29 @@ boolCases defaultt [] = defaultt
 -- default is the default case , in case all other fail.
 translateTCase :: MonadReader Env m => Term -> Term -> [TAlt] -> m Term
 translateTCase tcase defaultt tas = do
-  (rmAlts , cs) <-translateTACon tcase tas
+  (rmAlts , (cs , ind)) <-translateTACon tcase tas
   grdcs <- translateLitOrGuard tcase rmAlts
-  pure $ Mswitch tcase (cs ++ [(defaultCase , boolCases defaultt grdcs)])
+  case ind of
+    Inductive -> pure $ Mswitch tcase (cs ++ [(defaultCase , boolCases defaultt grdcs)])
+    CoInductive -> pure $ Mswitch (Mforce tcase) (cs ++ [(defaultCase , boolCases defaultt grdcs)])
 
 
 defaultCase :: [Case]
 defaultCase = [CaseAnyInt, Deftag]
 
-bindFields :: [Ident] -> Set Int -> Term -> Term -> Term
-bindFields vars used termc body = case map bind varsRev of
+bindFields :: [Ident] -> Set Int -> Term -> Term -> Induction -> Term
+bindFields vars used termc body ind = case map bind varsRev of
   [] -> body
   binds -> Mlet binds body
   where
     varsRev = zip [0..] (reverse vars)
     bind (ix, iden)
       -- TODO: we bind all fields. The detection of used fields is bugged.
-      | True || Set.member ix used = Named iden (Mfield ix termc)
+      | True || Set.member ix used =
+        case ind of
+          Inductive -> Named iden (Mfield ix termc)
+          CoInductive -> Named iden (Mfield ix (Mforce termc))
+
       | otherwise = Named iden wildcardTerm
 
 -- t here is (Var i)
@@ -416,22 +420,28 @@ introVars k ma = do
 introVar :: MonadReader Env m => m a -> m (Ident, a)
 introVar ma = first head <$> introVars 1 ma
 
-
-etareduction :: (Term , [Term]) -> Term
-etareduction ((Mlambda ids t) , xs) = hp ids t xs
+-- This is also used to place the Mlazy in the correct place.
+betareduction :: (Term , [Term]) -> Term
+betareduction ((Mlambda ids t) , xs) = hp ids t xs
   where
     hp (id : ids) t (x : xs) = hp ids (replaceTr (Mvar id) x t) xs
     hp [] t (x : xs) = Mapply t (x : xs)
     hp (id : ids) t [] = Mlambda (id : ids) t
     hp [] t [] = t
-etareduction (t , xs) = Mapply t xs
+betareduction (Mlazy (Mlambda ids t) , xs) = Mlazy $ hp ids t xs
+  where
+    hp (id : ids) t (x : xs) = hp ids (replaceTr (Mvar id) x t) xs
+    hp [] t (x : xs) = Mapply t (x : xs)
+    hp (id : ids) t [] = Mlambda (id : ids) t
+    hp [] t [] = t
+betareduction (t , xs) = Mapply t xs
 
 translateApp :: MonadReader Env m => TTerm -> [TTerm] -> m Term
 translateApp ft xst =
   do
     f <- translateTerm ft
     xs <- mapM translateTerm xst
-    pure $ etareduction (f , xs)
+    pure $ betareduction (f , xs)
 
 ident :: Int -> Ident
 ident i = Ident $ "v" ++ show i
@@ -520,9 +530,12 @@ translateCon :: MonadReader Env m => QName -> m Term
 translateCon nm = do
       cnr <- askConRep nm
       case cnr of
-        BlockRep{conTag = tag , conArity' = arity} -> do
+        BlockRep{conTag = tag , conArity' = arity , conInd' = conInd} -> do
           let vs = take arity $ map (Ident . pure) ['a'..]
-          pure $ Mlambda vs (Mblock tag (map Mvar vs))
+          case conInd of
+            Inductive -> pure $ Mlambda vs (Mblock tag (map Mvar vs))
+            -- The Mlazy is incorrectly placed here, but betareduction and "let elimination" will fix this.
+            CoInductive -> pure $ Mlazy $ Mlambda vs (Mblock tag (map Mvar vs))
         IntRep{conTag = tag} -> pure $  Mint $ CInt tag
 
 
@@ -531,7 +544,7 @@ translateCon nm = do
 askConRep :: MonadReader Env f => QName -> f ConRep
 askConRep q = fromMaybe err <$> lookupConRep q
   where
-    err = error $ "Could not find constructor with qname: " ++ show q
+    err = __IMPOSSIBLE__
 
 lookupConRep :: MonadReader Env f => QName -> f (Maybe ConRep)
 lookupConRep ns = Map.lookup (qnameNameId ns) <$> asks conMap
@@ -646,10 +659,10 @@ handlePragma def@Defn{defName = q , defType = ty , theDef = d} = do
                          genericWarning
                            $ fwords $ "Warning : There are postulates that have not been defined : " ++ prettyShow q
                          pure Nothing
-                       _ -> error "IMPOSSIBLE"
+                       _ -> __IMPOSSIBLE__
 
-      Datatype{} -> error $ "Please Report it as a bug."
-      Record{} -> error $ "Please Report it as a bug."
+      Datatype{} -> __IMPOSSIBLE__
+      Record{} -> __IMPOSSIBLE__
       Primitive{} -> pure $ Just $ Left def
       Function{} -> pure $ Just $ Left def
       _ -> pure Nothing
@@ -666,7 +679,7 @@ handleFunctionNoPragma env (Defn{defName = q , theDef = d}) =
     Function{funDelayed = delayed} ->
        do
          case delayed of
--- TODO Handle the case where it is delayed.
+-- TODO Handle the case where it is delayed. Delayed is the wrong primitive here. Fix this.
            Delayed -> error $ "Delayed is set to True for function name :" ++ prettyShow q
            NotDelayed -> do
               mt <- toTreeless EagerEvaluation q
@@ -747,7 +760,7 @@ handleFunctions env allDefs = do
 
 
 handleExport :: Definition -> TCM (Maybe Export)
-handleExport def@Defn{defName = q} = do
+handleExport Defn{defName = q} = do
   p <- getOCamlPragma q
   pure $ maybe Nothing (\x -> case x of
                            (OCExport _ s) -> Just (nameToIdent q , s)

@@ -6,7 +6,6 @@ import Agda.Compiler.Malfunction.AST
 import Agda.Compiler.Malfunction.Primitive
 import Agda.Compiler.Common
 import Data.List
-import Data.Maybe
 import qualified Data.Map.Strict as M
 import qualified Data.Generics.Uniplate.Data as Uniplate
 
@@ -62,6 +61,8 @@ findUsedIdents = foldMap step . Uniplate.universe
     Mveclen{}          -> mempty
     Mblock{}           -> mempty
     Mfield{}           -> mempty
+    Mlazy{}            -> mempty
+    Mforce{}           -> mempty
 
 
 
@@ -75,7 +76,7 @@ initFAU b allIds = let env = M.delete (fst b) (M.fromList allIds)
 -- otherwise only those used by main.
 
 eraseB :: [Binding] -> Maybe [Ident] -> (IsMain , [Binding])
-eraseB bs (Just []) = (NotMain , [])
+eraseB _ (Just []) = (NotMain , [])
 eraseB bs (Just exids) =
   let allIds = findAllIdents bs
       exs = foldr (\x y -> y ++ maybe [] (\t -> [(x , t)]) (lookup x allIds)) [] exids

@@ -133,7 +133,7 @@ binOp tp op = Mlambda ["a", "b"] (Mbiop op tp (Mvar "a") (Mvar "b"))
 
 -- | Defines a run-time error in Malfunction - equivalent to @error@ in Haskell.
 errorT :: String -> Term
-errorT err = Mapply (Mglobal ["Pervasives", "failwith"]) [Mstring err]
+errorT err = Mapply (Mglobal ["Stdlib", "failwith"]) [Mstring err]
 
 
 unitT :: Term
@@ -146,7 +146,7 @@ maxT = Mlambda ["a" , "b"] unitT
 
 
 primStringAppend :: Term
-primStringAppend = Mglobal ["Pervasives", "^"]
+primStringAppend = Mglobal ["Stdlib", "^"]
 
 primCode :: String -> Term
 primCode s = Mglobal (Longident (Ident "ForeignCode" : Ident "Primitives" : Ident s : []))

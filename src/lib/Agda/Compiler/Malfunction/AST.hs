@@ -216,6 +216,9 @@ data Term
   -- Blocks
   | Mblock Int [Term]
   | Mfield Int Term
+  -- Lazy Evaluation
+  | Mlazy Term
+  | Mforce Term
 
 deriving stock instance Show     Term
 deriving stock instance Eq       Term
@@ -299,6 +302,9 @@ instance Pretty Term where
     -- Blocks
     Mblock i ts         -> level ("block" <+> parens ("tag" <+> pretty i)) (prettyList__ ts)
     Mfield i t0         -> parens $ "field" <+> pretty i <+> pretty t0
+  -- lazy evaluation
+    Mlazy t             -> parens $ "lazy" <+> pretty t
+    Mforce t            -> parens $ "force" <+> pretty t
   prettyPrec _ = pretty
 
 instance Pretty Binding where

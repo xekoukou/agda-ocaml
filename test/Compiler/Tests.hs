@@ -82,8 +82,6 @@ disabledTests =
   
   -- Temporarily Disabled TODO Enable them.
   
-  , RFInclude "Compiler/OCaml/simple/Coind"
-  , RFInclude "Compiler/OCaml/simple/CompilingCoinduction"
   , RFInclude "Compiler/OCaml/simple/CompilingQNamePats"
   , RFInclude "Compiler/OCaml/simple/CopatternStreamSized"
   , RFInclude "Compiler/OCaml/simple/Floats"
