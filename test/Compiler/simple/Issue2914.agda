@@ -1,15 +1,15 @@
 
-open import Agda.Builtin.IO
-open import Agda.Builtin.Nat
-open import Agda.Builtin.Unit
+open import Common.IO
+open import Common.Nat
+open import Common.String
+open import Common.Unit
 
 private
   n : Nat
   n = 7
 
-{-# COMPILE GHC n as n #-}
+{-# COMPILE OCaml n as val n : Z.t #-}
 
-postulate
-  main : IO ⊤
-
-{-# COMPILE GHC main = print n #-}
+main : IO Unit
+main = do
+          putStrLn (natToString n)

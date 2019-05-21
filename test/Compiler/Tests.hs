@@ -69,21 +69,15 @@ disabledTests =
   [ -- The Ocaml backend always checks that all postulates have pragmas.
     RFInclude "Compiler/OCaml/simple/Irrelevant"
   , RFInclude "Compiler/.*/simple/Sharing" -- See issue 1528
-  , RFInclude "Compiler/OCaml/simple/Issue2821"    -- GHC backend specific
-  , RFInclude "Compiler/OCaml/simple/Issue2914"    -- GHC backend specific
     -- Fix to 2524 is too unsafe
   , RFInclude "Compiler/.*/simple/Issue2524"
-    -- The following test cases are GHC backend specific.
   , RFInclude "Compiler/OCaml/simple/Issue2879-.*"
   , RFInclude "Compiler/OCaml/simple/Issue2909-.*"
   , RFInclude "Compiler/OCaml/simple/Issue2918"
-    -- Segfaulting 2640 behaves differently on travis
-  , RFInclude "Compiler/.*/simple/Erasure-Issue2640"
   
   -- Temporarily Disabled TODO Enable them.
   
   , RFInclude "Compiler/OCaml/simple/CompilingQNamePats"
-  , RFInclude "Compiler/OCaml/simple/CopatternStreamSized"
   , RFInclude "Compiler/OCaml/simple/Floats"
   , RFInclude "Compiler/OCaml/simple/FloatsUHCFails"
   , RFInclude "Compiler/OCaml/simple/Issue1486"
