@@ -119,8 +119,13 @@ removeLets (Mblock x bs) = let nbs = map removeLets bs
                            in Mblock x nbs
 removeLets (Mfield x t) = let nt = removeLets t
                           in Mfield x nt
+removeLets (Mlazy t) =  let nt = removeLets t
+                        in Mlazy nt
+removeLets (Mforce t) =  let nt = removeLets t
+                         in Mforce nt
 removeLets x =  x
  
+
 
 
 
@@ -200,7 +205,7 @@ findCF self@(Mapply a bs) = do
                                   nself = Mapply na nbs
                               noid <- newOID
                               pure (M.insert self (nself , noid , False) nall , nself )
-findCF self@(Mlet bs t) = error "We have removed all let statements"
+findCF self@(Mlet bs t) = __IMPOSSIBLE__
 
 -- We have to put all new let statements after the switch.
 findCF self@(Mswitch ta tb) =  do
@@ -265,6 +270,12 @@ findCF  (Mblock x bs) =  do
                                  pure (nall , Mblock x (map snd rs))
 findCF  (Mfield x t) =   do (tms , nself) <- findCF  t
                             pure (tms , Mfield x nself)
+
+-- TODO Is this correct? I need to simplify the algorithm here.
+findCF  self@(Mforce _)  = do noid <- newOID
+                              pure (M.insert self (self , noid , False) M.empty , self)
+
+-- lazy evaluated expressions should not introduce lets statements.
 findCF  x = pure (M.empty , x)
 
 
@@ -357,6 +368,8 @@ removeLetsVar x =  x
 
 
 -- Used in Functions.
+-- IMPORTANT : removeLets also protects against infinite loops in case of Coinduction.
+-- so it is not just an optimization.
 optimizeLets :: Term -> Term
 optimizeLets (Mlambda ids t) = Mlambda ids (removeLetsVar $ introduceLets $ removeLets t)
 optimizeLets (Mblock tag tms) = Mblock tag (map (removeLetsVar . introduceLets . removeLets) tms)
