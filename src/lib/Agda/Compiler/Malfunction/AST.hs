@@ -32,7 +32,6 @@ module Agda.Compiler.Malfunction.AST
   , topModNameToLIdent
   ) where
 
-import Prelude hiding ((<>))
 import Data.Int
 import Data.Char
 -- There does exist a definition of a type-class `Pretty` in the package

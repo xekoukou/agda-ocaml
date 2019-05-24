@@ -271,7 +271,7 @@ translateTerm = \case
 --       True -> pure $ error "caseLazy error."
 --       False -> do
 
-  TCase i cinfo deflt alts -> do
+  TCase i _ deflt alts -> do
       t <- indexToVarTerm i
       d <- translateTerm deflt
       translateTCase t d alts
@@ -710,6 +710,7 @@ wIOFunction def self@(id , t) = do
                       0 -> pure (id , Mlambda [Ident "world"] (Mapply t [Mvar (Ident "world")]))
                       _ -> pure (id , t)
         _ -> pure self
+    _ -> __IMPOSSIBLE__
 
 handleFunction :: Env -> Definition -> TCM (Maybe (Ident , Term))
 handleFunction env def = do

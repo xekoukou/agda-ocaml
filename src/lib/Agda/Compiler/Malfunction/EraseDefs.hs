@@ -1,7 +1,5 @@
-{-# OPTIONS_GHC -Wall #-}
 module Agda.Compiler.Malfunction.EraseDefs (eraseB , findUsedIdents) where
 
-import Prelude hiding (id)
 import Agda.Compiler.Malfunction.AST
 import Agda.Compiler.Malfunction.Primitive
 import Agda.Compiler.Common

@@ -1,4 +1,3 @@
-{-# LANGUAGE CPP #-}
 module Agda.Compiler.Malfunction.Pragmas where
 
 
@@ -19,11 +18,7 @@ import Agda.TypeChecking.Primitive
 
 import Agda.Utils.Lens
 import Agda.Utils.Parser.ReadP
-import Agda.Utils.Pretty hiding (char)
-import Agda.Utils.String ( ltrim )
-import Agda.Utils.Three
 
-import Agda.Compiler.Common
 
 import Agda.Utils.Impossible
 

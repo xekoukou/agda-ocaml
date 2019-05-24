@@ -27,7 +27,6 @@ library
                      , Agda.Compiler.Malfunction.Optimize
                      , Agda.Compiler.Malfunction.Pragmas
                      , Agda.Compiler.Malfunction.Primitive
-                     , Agda.Compiler.Malfunction.Instances
   build-depends:       Agda       >= 2.6.0
                      , base       >= 4.7  && < 5
                      , containers >= 0.5  && < 0.6

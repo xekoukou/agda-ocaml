@@ -18,7 +18,6 @@ import           Control.Monad
 import           Control.Monad.Extra
 import           Control.Monad.Trans
 import           Data.List
-import           Data.List.Split
 import           Data.Char
 import           Data.Maybe
 import           Data.Map                            (Map)
@@ -114,13 +113,13 @@ ocamlMayEraseType q = do
 -- Create the treeless Term here, so that we use the pragma options of the file
 -- the definition comes from.
 mlfCompileDef :: Definition -> TCM (Maybe Definition)
-mlfCompileDef def@(Defn{defName = q , defArgInfo = info , defNoCompilation = noC}) | (isIrrelevant info || noC) = do
+mlfCompileDef (Defn{defName = q , defArgInfo = info , defNoCompilation = noC}) | (isIrrelevant info || noC) = do
   reportSDoc "compile.ghc.definition" 10 $
            pure $ text "Not compiling" <+> (pretty q <> text ".")
   pure Nothing
 mlfCompileDef def@Defn{defName = q} = do
   case (theDef def) of
-    Function{} -> do toTreeless EagerEvaluation q
+    Function{} -> do _ <- toTreeless EagerEvaluation q
                      pure ()
     _ -> pure ()
   pure $ Just def
@@ -165,7 +164,8 @@ definitionSummary opts def = when (optDebugMLF opts) $ do
         Record{}           -> "record"
         AbstractDefn{}     -> "abstract"
         Axiom{}            -> "axiom"
-        GeneralizableVar{} -> error "Malfunction.definitionSummar: TODO"
+        GeneralizableVar{} -> error "TODO"
+        DataOrRecSig{}     -> error "TODO"
 
 
 
@@ -192,12 +192,12 @@ outFile m = do
 
 
 mlfCompile :: MlfOptions -> IsMain -> Map ModuleName [Definition] -> TCM ()
-mlfCompile opts modIsMain mods = do
+mlfCompile opts _ mods = do
   agdaMod <- curMName
   let outputName = case mnameToList agdaMod of
                     [] -> error "Impossible"
                     ms -> last ms
-  (mdir , dir , fp) <- outFile (mnameToList agdaMod)
+  (mdir , _ , fp) <- outFile (mnameToList agdaMod)
 
   -- TODO review ?? Report debugging Information 
   mapM_ (definitionSummary opts) allDefs
