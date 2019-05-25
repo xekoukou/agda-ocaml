@@ -396,5 +396,22 @@ optimizeLetsB [] = []
 
 
 -- Erasure of all unnecessary code.
+-- Each edge is an input or an output of a function.
 
-data Edge = Input Ident | Output Ident
+-- Two edges that are put into the same set , correspond to the same value.
+-- An input of a function can be an input of a function inside it.
+-- An output of a function can be an input of another function.
+
+-- We do not consider idents that are part of lambda , and let statements do not exist at this point.
+-- As soon as we have the sets, we remove output edges that are alone.
+-- If all output edges of a function are removed, we remove its inputs.
+-- If an input of a function is not input to other functions inside it, we remove that input.
+-- (We need to tag primitive functions.)
+
+-- We do this iteratively untill we reach the minimum sets.
+-- The main function or the exported functions are the ones we cannot touch, remove inputs or outputs.
+-- (??For the main function , we need to take care that we do not remove IO??)
+
+data Edge = Input Ident Ident | Output Ident Ident
+
+

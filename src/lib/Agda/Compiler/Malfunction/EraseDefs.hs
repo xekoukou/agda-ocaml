@@ -25,8 +25,9 @@ findMain ms = let fms = filter (\(Ident x , _t) -> "main" `isSuffixOf` x) ms
 findAllUsedBindings :: M.Map Ident Term -> Term -> M.Map Ident Term
 findAllUsedBindings env0 t0 = snd $ foldr g (nEnv , newItems) nid
   where
-  nid = concatMap f $ findUsedIdents t0
-  newItems = M.fromList nid
+  nid' = concatMap f $ findUsedIdents t0
+  newItems = M.intersection (M.fromList nid') env0
+  nid = M.toList newItems
   nEnv = M.difference env0 newItems
   f x = case M.lookup x env0 of
     Just a -> [(x , a)]
@@ -64,9 +65,10 @@ findUsedIdents = foldMap step . Uniplate.universe
 
 
 -- TODO This is inefficient, second argument should be a map with the previous used bindings removed.
-initFAU :: (Ident, Term) -> [(Ident , Term)] -> M.Map Ident Term
-initFAU b allIds = let env = M.delete (fst b) (M.fromList allIds)
-                   in findAllUsedBindings env (snd b)
+initFAU :: (Ident, Term) -> M.Map Ident Term -> (M.Map Ident Term , M.Map Ident Term)
+initFAU b allIds = let env = M.delete (fst b) allIds
+                       newItems = findAllUsedBindings env (snd b)
+                   in (M.difference env newItems , newItems)
 
 
 -- Second argument is the list of exports if we return a library.
@@ -78,12 +80,13 @@ eraseB _ (Just []) = (NotMain , [])
 eraseB bs (Just exids) =
   let allIds = findAllIdents bs
       exs = foldr (\x y -> y ++ maybe [] (\t -> [(x , t)]) (lookup x allIds)) [] exids
-      ubs = foldr (\x y -> M.union y (initFAU x allIds)) M.empty exs
-  in (NotMain , foldr (orderB (M.union ubs (M.fromList exs))) [] bs)
+      ubs = foldr (\x (env , y) -> let (nenv , nitems) = initFAU x env
+                                   in (nenv , M.union y nitems) ) (M.fromList allIds , M.empty) exs
+  in (NotMain , foldr (orderB (M.union (snd $ ubs) (M.fromList exs))) [] bs)
 eraseB bs Nothing =
   case findMain allIds of
     Just main ->
-      let ubs = initFAU main allIds
+      let ubs = snd $ initFAU main (M.fromList allIds)
       in (IsMain , (foldr (orderB ubs) [] bs) ++ [Named (Ident "main") (Mapply (Mglobal run) [Mapply (snd main) [unitT]])])
     -- We return nothing because we will throw an error.
     Nothing -> (NotMain , [])
