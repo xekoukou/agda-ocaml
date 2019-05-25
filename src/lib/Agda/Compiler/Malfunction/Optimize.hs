@@ -367,6 +367,13 @@ removeLetsVar x =  x
 -----------------------------------------------------------
 
 
+perfOpt :: (Term -> Term) -> Term -> Term
+perfOpt f (Mlambda ids t) = Mlambda ids (f t)
+perfOpt f (Mblock tag tms) = Mblock tag (map f tms)
+perfOpt f r = r
+
+
+
 -- Used in Functions.
 -- IMPORTANT : removeLets also protects against infinite loops in case of Coinduction.
 -- so it is not just an optimization.
@@ -375,7 +382,11 @@ optimizeLets (Mlambda ids t) = Mlambda ids (removeLetsVar $ introduceLets $ remo
 optimizeLets (Mblock tag tms) = Mblock tag (map (removeLetsVar . introduceLets . removeLets) tms)
 optimizeLets r = r
 
-
+perfOptB :: (Term -> Term) -> [Binding] -> [Binding]
+perfOptB f (Named id t : bs) = Named id (f t) : perfOptB f bs
+perfOptB f (Recursive ys : bs) = Recursive (zip (map fst ys) (map (f . snd) ys)) : perfOptB f bs
+perfOptB f (_ : bs) = error "Unnamed binding?"
+perfOptB f [] = []
 
 optimizeLetsB :: [Binding] -> [Binding]
 optimizeLetsB (Named id t : bs) = Named id (optimizeLets t) : optimizeLetsB bs
@@ -383,3 +394,7 @@ optimizeLetsB (Recursive ys : bs) = Recursive (zip (map fst ys) (map (optimizeLe
 optimizeLetsB (_ : bs) = error "Unnamed binding?"
 optimizeLetsB [] = []
 
+
+-- Erasure of all unnecessary code.
+
+data Edge = Input Ident | Output Ident

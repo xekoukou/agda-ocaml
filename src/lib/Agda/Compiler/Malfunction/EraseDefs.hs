@@ -63,7 +63,7 @@ findUsedIdents = foldMap step . Uniplate.universe
     Mforce{}           -> mempty
 
 
-
+-- TODO This is inefficient, second argument should be a map with the previous used bindings removed.
 initFAU :: (Ident, Term) -> [(Ident , Term)] -> M.Map Ident Term
 initFAU b allIds = let env = M.delete (fst b) (M.fromList allIds)
                    in findAllUsedBindings env (snd b)

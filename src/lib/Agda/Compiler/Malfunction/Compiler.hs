@@ -704,10 +704,10 @@ wIOFunction def self@(id , t) = do
       case (unEl $ theCore tv) of
         Def d _ | d == io ->   case t of
                     Mlambda ids tt -> case (ln == length ids) of
-                      True -> pure (id , Mlambda (ids ++ [Ident "world"]) (Mapply tt [Mvar (Ident "world")]))
+                      True -> pure (id , Mlambda (ids ++ ["world"]) (Mapply tt [Mvar "world"]))
                       False -> pure (id , Mlambda ids tt)
                     _ -> case ln of
-                      0 -> pure (id , Mlambda [Ident "world"] (Mapply t [Mvar (Ident "world")]))
+                      0 -> pure (id , Mlambda ["world"] (Mapply t [Mvar "world"]))
                       _ -> pure (id , t)
         _ -> pure self
     _ -> __IMPOSSIBLE__
