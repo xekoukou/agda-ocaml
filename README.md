@@ -49,9 +49,15 @@ The ```stack``` package manager is also required to perform the installation.
 
 ## Limitations
 
-Currently , there is no support for Coinduction , float types or the reflection primitives.
+Currently , there is no support for float types or the reflection primitives.
 
+For float types, this is intentional, since anyone could use the FFI to perform computations on float types.
 
+## Important Notice
+
+Currently, I have tried to match the string(unicode) implementation of haskell as much as possible. There might be differences though which means that
+even though one could show string equality during typechecking, this might not be the case during execution. For this reason, the string primitives should not be used in critical parts
+of your code.
 
 ## Usage
 
