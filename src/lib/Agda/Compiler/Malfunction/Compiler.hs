@@ -84,9 +84,9 @@ import           Agda.TypeChecking.Warnings
 
 
 -- TODO Review this code.
-dependencyGraph :: [(QName, TTerm)] -> [SCC (QName, TTerm)]
-dependencyGraph qs = stronglyConnComp [ ((qn, tt), qnameNameId qn, edgesFrom tt)
-                                    | (qn, tt) <- qs ]
+dependencyGraph :: [(QName , (ModuleName , TTerm))] -> [SCC (QName , (ModuleName , TTerm))]
+dependencyGraph qs = stronglyConnComp [ ((qn, (mn , tt)), qnameNameId qn, edgesFrom tt)
+                                    | (qn, (mn , tt)) <- qs ]
   where edgesFrom = Set.toList . qnamesIdsInTerm
 
 
@@ -611,8 +611,8 @@ namedBinding q t = (`Named`t) $ nameToIdent q
 
 
 
-handlePragma :: Definition -> TCM (Maybe (Either Definition (Ident , Term)))
-handlePragma def@Defn{defName = q , defType = ty , theDef = d} = do
+handlePragma :: ModuleName -> Definition -> TCM (Maybe (Either Definition (Ident , Term)))
+handlePragma mn def@Defn{defName = q , defType = ty , theDef = d} = do
   reportSDoc "compile.ghc.definition" 10 $ pure $ vcat
     [ text "Compiling" <+> (pretty q <> text ":")
     , nest 2 $ text (show d)
@@ -636,8 +636,7 @@ handlePragma def@Defn{defName = q , defType = ty , theDef = d} = do
         -- TODO At the moment we do not check that the type of the OCaml function corresponds to the
         -- type of the agda function or the postulate.
         let ident = nameToIdent q
-            mdn = (toTopLevelModuleName . qnameModule) q
-            longIdent = topModNameToLIdent "ForeignCode" mdn oc
+            longIdent = topModNameToLIdent "ForeignCode" (toTopLevelModuleName mn) oc
         pure $ Just $ Right (ident , (Mglobal longIdent))
         
 
@@ -712,9 +711,9 @@ wIOFunction def self@(id , t) = do
         _ -> pure self
     _ -> __IMPOSSIBLE__
 
-handleFunction :: Env -> Definition -> TCM (Maybe (Ident , Term))
-handleFunction env def = do
-  r <- handlePragma def
+handleFunction :: Env -> (ModuleName , Definition) -> TCM (Maybe (Ident , Term))
+handleFunction env (mn , def) = do
+  r <- handlePragma mn def
   case r of
     Nothing -> pure Nothing
     Just (Right bs) -> Just <$> wIOFunction def bs 
@@ -723,39 +722,40 @@ handleFunction env def = do
       maybe (pure Nothing) (\x -> Just <$> wIOFunction def x) b
 
 
-handleFunctions :: Env -> [Definition] -> TCM [Binding]
+handleFunctions :: Env -> [(ModuleName , Definition)] -> TCM [Binding]
 handleFunctions env allDefs = do
   let (others , fns) = splitPrim allDefs
   os <- mapM (handleFunction env) others
   let obs = map (\x -> Named (fst x) (snd x)) (catMaybes os)
-  qts <- mapM (\x -> do
+  qts <- mapM (\(mn , x) -> do
                   let q = defName x
                   noC <- defNoCompilation <$> getConstInfo q
                   case noC of
                     True -> pure Nothing
                     False -> do
                       t <- toTreeless EagerEvaluation q
-                      pure $ maybe Nothing (\rt -> Just (q , rt)) t) fns
+                      pure $ maybe Nothing (\rt -> Just (q , (mn , rt))) t) fns
   let recGrps = dependencyGraph (catMaybes qts)
   tmp <- mapM translateSCC recGrps
   pure $ obs ++ (catMaybes tmp)           where
     translateSCC scc = case scc of
       AcyclicSCC single -> do
         def <- getConstInfo (fst single)
-        rs <- handleFunction env def
+        rs <- handleFunction env ((fst (snd single)) , def)
         pure $ maybe Nothing (\x -> Just $ Named (fst x) (snd x)) rs
       CyclicSCC grp -> do
         defs <- mapM (getConstInfo . fst) grp
-        rs <- mapM (handleFunction env) defs
+        let mns = map (fst . snd) grp
+        rs <- mapM (handleFunction env) (zip mns defs)
         case (catMaybes rs) of
           [] -> pure Nothing
           rss -> pure $ Just $ Recursive rss
      -- We handle primitives differently here because
      -- toTreeless fails on primitives.
-    splitPrim :: [Definition] -> ([Definition] , [Definition])
-    splitPrim = partitionEithers . map (\def -> case (theDef def) of
-                                        Function{} -> Right def
-                                        _        -> Left def  ) 
+    splitPrim :: [(ModuleName , Definition)] -> ([(ModuleName , Definition)] , [(ModuleName , Definition)])
+    splitPrim = partitionEithers . map (\(mn , def) -> case (theDef def) of
+                                        Function{} -> Right (mn , def)
+                                        _        -> Left (mn , def) ) 
               
 
 
@@ -769,20 +769,20 @@ handleExport Defn{defName = q} = do
 
 
 compile
-  :: [Definition]
+  :: [(ModuleName , Definition)]
   -> TCM ([Binding] , [Export])
 compile defs = do
   let (dts , others) = split defs
   env <- mkCompilerEnv dts
-  exs <- mapM handleExport others
+  exs <- mapM handleExport (map snd others)
   bs <- handleFunctions env others
   pure (bs , catMaybes exs) where
-    split :: [Definition] -> ([Definition] , [Definition])
+    split :: [(ModuleName , Definition)] -> ([Definition] , [(ModuleName , Definition)])
     split xs = partitionEithers
-               $ map (\x -> case theDef x of
+               $ map (\(mn , x) -> case theDef x of
                        Datatype{} -> Left x
                        Record{} -> Left x
-                       _ ->  Right x  ) xs
+                       _ ->  Right (mn , x)  ) xs
 
 
 

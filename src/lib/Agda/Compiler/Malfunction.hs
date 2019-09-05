@@ -200,7 +200,7 @@ mlfCompile opts _ mods = do
   (mdir , _ , fp) <- outFile (mnameToList agdaMod)
 
   -- TODO review ?? Report debugging Information 
-  mapM_ (definitionSummary opts) allDefs
+  mapM_ (definitionSummary opts) (map snd allDefs)
 
   
   let returnLib = optMLFLib opts
@@ -244,15 +244,15 @@ mlfCompile opts _ mods = do
       callCompiler doCall mdir args_focaml
       
   where
-    allDefs :: [Definition]
-    allDefs = concat (Map.elems mods)
+    allDefs :: [(ModuleName , Definition)]
+    allDefs = concat (map (\(x , l) -> map (\w -> (x , w)) l) (Map.toList mods))
 
 
 
 
 
 
-analyzeCode :: [Definition] -> Bool -> TCM (Mod , [String])
+analyzeCode :: [(ModuleName , Definition)] -> Bool -> TCM (Mod , [String])
 analyzeCode defs rl = do
     agdaMod <- curMName
     (bss , exs) <- C.compile defs
@@ -291,10 +291,10 @@ writeCodeToModule isLib fp = do
   let adCode = case isLib of
         True -> ""
         False -> "let main_run = Lwt_main.run\n\n"
-  ifs <- map miInterface . Map.elems <$> getVisitedModules
-  let fcs = foldr (\i s-> let mfc = (Map.lookup "OCaml" . iForeignCode) i
+  ifs <- Map.toList <$> Map.map miInterface <$> getVisitedModules
+  let fcs = foldr (\(tmn , i) s-> let mfc = (Map.lookup "OCaml" . iForeignCode) i
                           in case mfc of
-                              Just c -> s ++ [((moduleNameParts . toTopLevelModuleName . iModuleName) i , intercalate "\n\n" $ reverse $ map getCode c)]
+                              Just c -> s ++ [(moduleNameParts tmn , intercalate "\n\n" $ reverse $ map getCode c)]
                               _ -> s ) [] ifs
   liftIO (fp `writeFile` (adCode ++ primitivesCode ++ (retCode fcs))) where
     getCode (ForeignCode _ code)  = code
