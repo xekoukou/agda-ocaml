@@ -63,8 +63,7 @@ import           Agda.TypeChecking.Warnings
 
 
 
-
--- TODO Review this code.
+-- TODO Many we could get some help from Agda itself instead of doing this.
 dependencyGraph :: [(QName , (ModuleName , TTerm))] -> [SCC (QName , (ModuleName , TTerm))]
 dependencyGraph qs = stronglyConnComp [ ((qn, (mn , tt)), qnameNameId qn, edgesFrom tt)
                                     | (qn, (mn , tt)) <- qs ]
@@ -89,9 +88,6 @@ qnamesIdsInTerm t = go t mempty
           TACon q _ t -> insertId q (go t qs)
           TAGuard t b -> foldr go qs [t, b]
           TALit _ b -> go b qs
-
-
-
 
 
 
@@ -123,13 +119,11 @@ runTranslate :: Reader Env a -> Env -> a
 runTranslate = runReader
 
 
-mlfTagRange :: (Int, Int)
-mlfTagRange = (0, 199)
 
 
 
--- Concrete names are affected by renaming
--- and thus should not be used in the identity.
+-- Concrete names should not be used in the identity. This is
+-- used to introduce comments in the .mlf file.
 qnameToConc :: QName -> String
 qnameToConc qnm = concreteName qnm where
     toValid :: Char -> String
@@ -142,62 +136,54 @@ qnameToConc qnm = concreteName qnm where
 
 
 
--- | Returns all constructors grouped by data type.
-getConstrNms :: [Definition] -> [[QName]]
-getConstrNms = mapMaybe (getCons . theDef)
-  where
-    getCons :: Defn -> Maybe [QName]
-    getCons c@Datatype{} = Just (dataCons c)
-    -- The way I understand it a record is just like a data-type
-    -- except it only has one constructor and that one constructor
-    -- takes as many arguments as the number of fields in that
-    -- record.
-    getCons c@Record{}   = Just . pure . recCon $ c
-    getCons _            = Nothing
-
-
-getConstrInfo :: [[QName]] -> TCM [[(QName , (Arity , Induction))]]
-getConstrInfo allcons
-  | any ((>rangeSize mlfTagRange) . length) allcons = error "too many constructors"
-  | otherwise = mapM (mapM (\q -> (q,) <$> infoQName q)) allcons
-
-
--- | If the qnames references a constructor the arity and induction property of that constructor is returned.
-infoQName :: QName -> TCM (Int , Induction)
-infoQName q = f . theDef <$> getConstInfo q
-  where
-    f def = case def of
-      Constructor{} -> (conArity def , conInd def)
-      _             -> __IMPOSSIBLE__
-
-
-
-
-
-mkCompilerEnv' :: [[(QName, (Arity , Induction))]] -> Env
-mkCompilerEnv' consByDtype = Env {
-  conMap = conMap
-  , level = 0
-  }
-  where
-    singleDt :: Int -> Int -> [(QName , (Arity , Induction))] -> [(NameId , ConRep)]
-    singleDt ci vi ((q , (0 , ind)) : ms) = (qnameNameId q , IntRep {conTag = ci , conInd' = ind}) : singleDt (ci + 1) vi ms
-    singleDt ci vi ((q , (a , ind)) : ms) = (qnameNameId q , BlockRep {conTag = vi , conArity' = a , conInd' = ind}) : singleDt ci (vi + 1) ms
-    singleDt _ _ [] = []
-    
-    conMap = Map.fromList (concatMap (singleDt 0 0) consByDtype)
---     conMap = Map.fromList [ (qnameNameId qn, ConRep {..} )
---                           | typeCons <- consByDtype
---                            , (length consByDtype <= rangeSize mlfTagRange)
---                              || error "too many constructors"
---                            , (_conTag, (qn, _conArity)) <- zip (range mlfTagRange) typeCons ]
-
-
-mkCompilerEnv :: [Definition] -> TCM Env
-mkCompilerEnv defs = do
+constructEnv :: [Definition] -> TCM Env
+constructEnv defs = do
   let cns = getConstrNms defs
   cinfo <- getConstrInfo cns
-  pure $ mkCompilerEnv' cinfo
+  pure $ constructEnv' cinfo where
+    
+-- | Returns all constructors grouped by data type.
+  getConstrNms :: [Definition] -> [[QName]]
+  getConstrNms = map (getCons . theDef)
+    where
+      getCons :: Defn -> [QName]
+      getCons c@Datatype{} = dataCons c
+      getCons c@Record{}   = pure . recCon $ c
+      getCons _            = __IMPOSSIBLE__
+
+  maxTagRange :: (Int, Int)
+  maxTagRange = (0, 199)
+
+  getConstrInfo :: [[QName]] -> TCM [[(QName , (Arity , Induction))]]
+  getConstrInfo allcons
+    | any ((>rangeSize maxTagRange) . length) allcons = typeError $ CompilationError "too many constructors"
+    | otherwise = mapM (mapM (\q -> (q,) <$> infoQName q)) allcons where
+  
+    -- | If the qnames references a constructor the arity and induction property of that constructor is returned.
+    infoQName :: QName -> TCM (Int , Induction)
+    infoQName q = f . theDef <$> getConstInfo q
+      where
+        f def = case def of
+          Constructor{} -> (conArity def , conInd def)
+          _             -> __IMPOSSIBLE__
+
+  constructEnv' :: [[(QName, (Arity , Induction))]] -> Env
+  constructEnv' consByDtype = Env {
+    conMap = conMap
+    , level = 0
+    }
+    where
+      -- We apply the same structure that exists internally for OCaml algebraic data types.
+      singleDt :: Int -> Int -> [(QName , (Arity , Induction))] -> [(NameId , ConRep)]
+      singleDt ci vi ((q , (0 , ind)) : ms) = (qnameNameId q , IntRep {conTag = ci , conInd' = ind}) : singleDt (ci + 1) vi ms
+      singleDt ci vi ((q , (a , ind)) : ms) = (qnameNameId q , BlockRep {conTag = vi , conArity' = a , conInd' = ind}) : singleDt ci (vi + 1) ms
+      singleDt _ _ [] = []
+      
+      conMap = Map.fromList (concatMap (singleDt 0 0) consByDtype)
+  
+
+
+  
 
 
 -- | Translates a list treeless terms to a list of malfunction terms.
@@ -552,21 +538,6 @@ trueCase = [CaseInt 1]
 
 
 
--- | Translates a primitive to a malfunction binding. Returns `Nothing` if the primitive is unmapped.
-compilePrim
-  :: QName -- ^ The qname of the primitive
-  -> String -- ^ The name of the primitive
-  -> Maybe (Ident , Term)
-compilePrim q s = case x of
-                    Just y -> Just (nameToIdent q , y)
-                    Nothing -> Nothing
-  where
-    x = Map.lookup s Prim.primitives
-
-namedBinding :: QName -> Term -> Binding
-namedBinding q t = Named (nameToIdent q) (qnameToConc q) t
-
-
 
 
 handlePragma :: ModuleName -> Definition -> TCM (Maybe (Either Definition (Ident , Term)))
@@ -580,31 +551,16 @@ handlePragma mn def@Defn{defName = q , defType = ty , theDef = d} = do
   mflat  <- getBuiltinName builtinFlat
   
   case d of
-       -- TODO is this necessary? Probably yes.
-      _ | Just OCDefn{} <- pragma, Just q == mflat ->
-        genericError
-          "\"COMPILE OCaml\" pragmas are not allowed for the FLAT builtin."
-
+      _ | Just q == mflat -> typeError $ CompilationError "Flat is not supported."
+      _ | Just q == minf ->  typeError $ CompilationError "Inf is not supported."
 
       _ | Just (OCDefn r oc) <- pragma -> setCurrentRange r $ do
-        -- Check that the function isn't INLINE (since that will make this
-        -- definition pointless).
-        inline <- (^. funInline) . theDef <$> getConstInfo q
-        when inline $ warning $ UselessInline q
-        -- TODO At the moment we do not check that the type of the OCaml function corresponds to the
-        -- type of the agda function or the postulate.
         let ident = nameToIdent q
             longIdent = topModNameToLIdent "ForeignCode" (toTopLevelModuleName mn) oc
         pure $ Just $ Right (ident , (Mglobal longIdent))
-        
-
-      -- TODO is this necessary?
-      -- Compiling Inf
-      _ | Just q == minf -> genericError "Inf is not supported at the moment."
-
 
       Axiom{} -> do
-
+        
        -- We ignore Axioms on Sets.
        -- This backend has a single predefined representation of
        -- datatypes.
@@ -620,29 +576,30 @@ handlePragma mn def@Defn{defName = q , defType = ty , theDef = d} = do
 
       Datatype{} -> __IMPOSSIBLE__
       Record{} -> __IMPOSSIBLE__
-      Primitive{} -> pure $ Just $ Left def
+      Primitive{} -> __IMPOSSIBLE__
       Function{} -> pure $ Just $ Left def
+      AbstractDefn{} -> pure $ Just $ Left def
       _ -> pure Nothing
 
 
 
 
 
--- The map is used to check if the definition has already been processed.
--- This is due to recursive definitions.
 handleFunctionNoPragma :: Env -> Definition -> TCM (Maybe (Ident , Term))
 handleFunctionNoPragma env (Defn{defName = q , theDef = d}) = 
   case d of
     Function{funDelayed = delayed} ->
        do
          case delayed of
--- TODO Handle the case where it is delayed. Delayed is the wrong primitive here. Fix this.
-           Delayed -> error $ "Delayed is set to True for function name :" ++ prettyShow q
+           Delayed -> typeError $ InternalError $ "Delayed is set to True for function name :" ++ prettyShow q
            NotDelayed -> do
               mt <- toTreeless EagerEvaluation q
               pure $ maybe Nothing (\t -> Just $ runTranslate (translateBindingPair q t) env) mt
-    Primitive{primName = s} -> pure $ compilePrim q s
-    _ -> pure $ error "At handleFunction : Case not expected."
+    AbstractDefn{} ->
+      do
+         mt <- toTreeless EagerEvaluation q
+         pure $ maybe Nothing (\t -> Just $ runTranslate (translateBindingPair q t) env) mt
+    _ -> __IMPOSSIBLE__
         
 
 -- We add a world token to all IO function as long as they do not return a function.
@@ -682,22 +639,51 @@ handleFunction env (mn , def@Defn{defName = q}) = do
     addCn = (\(i , t) -> (i , (qnameToConc q , t)))
 
 
+handlePrimitives :: Env -> [(ModuleName , Definition)] -> TCM ([(ModuleName , Definition)] , [Binding])
+handlePrimitives env [] = pure ([] , [])
+handlePrimitives env ((mn , def@Defn{defName = q}) : xs) = do
+    (odef , obs) <- handlePrimitives env xs
+    case (theDef def) of
+      Primitive{primName = s} -> maybe (pure (odef , obs)) (\r -> pure $ (odef , Named (fst r) (qnameToConc q) (snd r) : obs)) (compilePrim q s)
+      _ -> pure ((mn , def) : odef , obs)
+  where
+    -- | Translates a primitive to a malfunction binding. Returns `Nothing` if the primitive is unmapped.
+    compilePrim
+      :: QName -- ^ The qname of the primitive
+      -> String -- ^ The name of the primitive
+      -> Maybe (Ident , Term)
+    compilePrim q s = case x of
+                        Just y -> Just (nameToIdent q , y)
+                        Nothing -> Nothing
+      where
+        x = Map.lookup s Prim.primitives
+  
+
+handleAxioms :: Env -> [(ModuleName , Definition)] -> TCM ([(ModuleName , Definition)] , [Binding])
+handleAxioms env [] = pure ([] , [])
+handleAxioms env ((mn , def@Defn{defName = q}) : xs) = do
+    (odef , obs) <- handleAxioms env xs
+    case (theDef def) of
+      Axiom -> do
+                  r <- handlePragma mn def
+                  case r of
+                    Nothing              -> pure (odef , obs)
+                    Just (Left _)        -> pure (odef , obs)
+                    Just (Right (i , t)) -> pure $ (odef , Named i (qnameToConc q) t : obs)
+      _ -> pure ((mn , def) : odef , obs)
+
+
 handleFunctions :: Env -> [(ModuleName , Definition)] -> TCM [Binding]
 handleFunctions env allDefs = do
-  let (others , fns) = splitPrim allDefs
-  os <- mapM (handleFunction env) others
-  let obs = map (\x -> Named (fst x) (fst (snd x)) (snd (snd x))) (catMaybes os)
+  (odefs , pbs) <- handlePrimitives env allDefs
+  (odefs , abs) <- handleAxioms env odefs
   qts <- mapM (\(mn , x) -> do
                   let q = defName x
-                  noC <- defNoCompilation <$> getConstInfo q
-                  case noC of
-                    True -> pure Nothing
-                    False -> do
-                      t <- toTreeless EagerEvaluation q
-                      pure $ maybe Nothing (\rt -> Just (q , (mn , rt))) t) fns
+                  t <- toTreeless EagerEvaluation q
+                  pure $ maybe Nothing (\rt -> Just (q , (mn , rt))) t) (onlyFun odefs)
   let recGrps = dependencyGraph (catMaybes qts)
   tmp <- mapM translateSCC recGrps
-  pure $ obs ++ (catMaybes tmp)           where
+  pure $ pbs ++ abs ++ (catMaybes tmp)           where
     translateSCC scc = case scc of
       AcyclicSCC single -> do
         def <- getConstInfo (fst single)
@@ -710,12 +696,13 @@ handleFunctions env allDefs = do
         case (catMaybes rs) of
           [] -> pure Nothing
           rss -> pure $ Just $ Recursive rss
-     -- We handle primitives differently here because
-     -- toTreeless fails on primitives.
-    splitPrim :: [(ModuleName , Definition)] -> ([(ModuleName , Definition)] , [(ModuleName , Definition)])
-    splitPrim = partitionEithers . map (\(mn , def) -> case (theDef def) of
-                                        Function{} -> Right (mn , def)
-                                        _        -> Left (mn , def) ) 
+          
+    onlyFun :: [(ModuleName , Definition)] -> [(ModuleName , Definition)]
+    onlyFun = filter (\(mn , def) -> case (theDef def) of
+                                         Function{}     -> True
+                                         AbstractDefn{} -> True
+                                         _              -> False) 
+      
               
 
 
@@ -732,17 +719,22 @@ compile
   :: [(ModuleName , Definition)]
   -> TCM ([Binding] , [Export])
 compile defs = do
-  let (dts , others) = split defs
-  env <- mkCompilerEnv dts
+  rdefs <- removeNoComp defs
+  let (dts , others) = dataOrOther rdefs
+  env <- constructEnv dts
   exs <- mapM handleExport (map snd others)
   bs <- handleFunctions env others
   pure (bs , catMaybes exs) where
-    split :: [(ModuleName , Definition)] -> ([Definition] , [(ModuleName , Definition)])
-    split xs = partitionEithers
+    dataOrOther :: [(ModuleName , Definition)] -> ([Definition] , [(ModuleName , Definition)])
+    dataOrOther xs = partitionEithers
                $ map (\(mn , x) -> case theDef x of
                        Datatype{} -> Left x
                        Record{} -> Left x
                        _ ->  Right (mn , x)  ) xs
+    removeNoComp = filterM (\(_ , x) -> do
+                    let q = defName x
+                    noC <- defNoCompilation <$> getConstInfo q
+                    return (not noC))
 
 
 
