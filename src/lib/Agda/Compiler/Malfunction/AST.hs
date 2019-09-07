@@ -14,8 +14,6 @@ module Agda.Compiler.Malfunction.AST
   , IntConst(..)
   , UnaryIntOp(..)
   , BinaryIntOp(..)
-  , VectorType(..)
-  , Mutability(..)
   , BlockTag
   , Case(..)
   , Ident(..)
@@ -105,22 +103,6 @@ deriving stock instance Ord       BinaryIntOp
 deriving stock instance Data     BinaryIntOp
 deriving stock instance Typeable BinaryIntOp
 
--- | Vector types.
-data VectorType = Array | Bytevec
-
-deriving stock instance Show     VectorType
-deriving stock instance Eq       VectorType
-deriving stock instance Ord       VectorType
-deriving stock instance Data     VectorType
-deriving stock instance Typeable VectorType
-
--- | Mutability
-data Mutability = Inm | Mut
-
-deriving stock instance Show     Mutability
-deriving stock instance Eq       Mutability
-deriving stock instance Data     Mutability
-deriving stock instance Typeable Mutability
 
 -- NOTE: Any tag value above 200 is an error in malfunction.
 --
@@ -155,7 +137,6 @@ deriving stock instance Ord       Case
 deriving stock instance Data     Case
 deriving stock instance Typeable Case
 
--- TODO Maybe move to 'Text'?
 -- | An identifier used to reference other values in the malfunction module.
 newtype Ident = Ident String
 
@@ -207,11 +188,6 @@ data Term
   | Muiop UnaryIntOp IntType Term
   | Mbiop BinaryIntOp IntType Term Term
   | Mconvert IntType IntType Term
-  -- Vectors
-  | Mvecnew VectorType Term Term
-  | Mvecget VectorType Term Term
-  | Mvecset VectorType Term Term Term
-  | Mveclen VectorType Term
   -- Blocks
   | Mblock Int [Term]
   | Mfield Int Term
@@ -225,28 +201,8 @@ deriving stock instance Ord       Term
 deriving stock instance Data     Term
 deriving stock instance Typeable Term
 
-
-
--- | Bindings
---
--- The atom `let` introduces a sequence of bindings:
---
---     (let BINDING BINDING BINDING ... BODY)
---
--- Each binding is of one of the forms:
---
---   - @Named@: @($var EXP)@: binds @$var@ to the result of evaluating @EXP@.
---              @$var@ scopes over subsequent bindings and the body.
---
---   - @Unnamed@: @(_ EXP)@: evaluates @EXP@ and ignores the result.
---
---   - @Recursive@: @(rec ($VAR1 EXP1) ($VAR2 EXP2) ...)@: binds each @$VAR@ mutually
---                  recursively. Each @EXP@ must be of the form @(lambda ...)@.
---                  Bindings scope over themselves, each other, subsequent
---                  bindings, and the body.
 data Binding
-  = Unnamed Term -- Where is unnamed used?
-  | Named Ident String Term
+  = Named Ident String Term
   | Recursive [(Ident, (String , Term))]
 
 deriving stock instance Show     Binding
@@ -293,11 +249,6 @@ instance Pretty Term where
     Muiop op tp t0    -> prettyTypedUOp tp op <+> pretty t0
     Mbiop op tp t0 t1 -> levelPlus (prettyTypedBOp tp op) [pretty t0, pretty t1]
     Mconvert tp0 tp1 t0 -> parens $ "convert" <.> pretty tp0 <.> pretty tp1 <+> pretty t0
-    -- Vectors
-    Mvecnew _tp t0 t1    -> levelPlus "makevec" [pretty t0, pretty t1]
-    Mvecget _tp t0 t1    -> levelPlus "load" [pretty t0, pretty t1]
-    Mvecset _tp t0 t1 t2 -> levelPlus "store" [pretty t0, pretty t1, pretty t2]
-    Mveclen _tp t0       -> level "length" (pretty t0)
     -- Blocks
     Mblock i ts         -> level ("block" <+> parens ("tag" <+> pretty i)) (prettyList__ ts)
     Mfield i t0         -> parens $ "field" <+> pretty i <+> pretty t0
@@ -308,7 +259,6 @@ instance Pretty Term where
 
 instance Pretty Binding where
   pretty b = case b of
-    Unnamed t    -> level "_" (pretty t)
     Named i cn t    -> text ("; " ++ cn ++ "\n") <+> level (pretty i) (pretty t)
     Recursive bs -> levelPlus "rec" (map showIdentTerm bs)
     where

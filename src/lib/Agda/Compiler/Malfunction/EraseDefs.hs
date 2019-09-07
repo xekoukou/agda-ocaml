@@ -54,10 +54,6 @@ findUsedIdents = foldMap step . Uniplate.universe
     Muiop{}            -> mempty
     Mbiop{}            -> mempty
     Mconvert{}         -> mempty
-    Mvecnew{}          -> mempty
-    Mvecget{}          -> mempty
-    Mvecset{}          -> mempty
-    Mveclen{}          -> mempty
     Mblock{}           -> mempty
     Mfield{}           -> mempty
     Mlazy{}            -> mempty
@@ -112,6 +108,3 @@ orderB allUM x osum = case x of
       p (id , _) = case M.lookup id allUM of
         Just _ -> True
         _      -> False
-  Unnamed{} -> error
-      $  "Agda.Compiler.Malfunction.EraseDefs.f.g: "
-      ++ "Non-exhaustive pattern match!"
