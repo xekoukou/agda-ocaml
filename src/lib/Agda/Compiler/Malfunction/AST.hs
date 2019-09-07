@@ -1,11 +1,7 @@
 {- |
 Module      :  Agda.Compiler.Malfunction.AST
-Maintainer  :  janmasrovira@gmail.com, hanghj@student.chalmers.se
+Maintainer  :  Apostolis Xekoukoulotakis
 
-This module defines the abstract syntax of
-<https://github.com/stedolan/malfunction Malfunction>. Please see the
-<https://github.com/stedolan/malfunction/blob/master/docs/spec.md Malfunction
-language specification>
 -}
 {-# LANGUAGE OverloadedStrings, UndecidableInstances #-}
 {-# OPTIONS_GHC -Wall -Wno-name-shadowing #-}
@@ -54,24 +50,7 @@ deriving stock instance Ord       IntType
 deriving stock instance Data     IntType
 deriving stock instance Typeable IntType
 
--- | An integer value tagged with its corresponding type.
 data IntConst
-  -- Int may be the wrong type.
-  --
-  -- In malfunction Int is:
-  --
-  -- > `int` uses either 31- or 63- bit two's complement arithmetic
-  -- > (depending on system word size, and also wrapping on overflow)
-  -- > https://github.com/stedolan/malfunction/blob/master/docs/spec.md
-  --
-  -- And in Haskell:
-  -- > A fixed-precision integer type with at least the range
-  -- > [-2^29 .. 2^29-1]
-  -- > https://hackage.haskell.org/package/base-4.9.0.0/docs/Data-Int.html
-  --
-  -- Jan: Just run
-  -- logBase 2 ((fromIntegral (maxBound :: Int)) :: Double)
-  -- in my computer (64 bits) --> 2 ^ 63 - 1 == (maxBound :: Int)
   = CInt Int
   | CInt32 Int32
   | CInt64 Int64
@@ -104,32 +83,20 @@ deriving stock instance Data     BinaryIntOp
 deriving stock instance Typeable BinaryIntOp
 
 
--- NOTE: Any tag value above 200 is an error in malfunction.
---
--- For this reason we may want to make BlockTag a newtype and only export a constructor.
---
 -- | A tag used in the construction of $Block@s.
 newtype BlockTag = BlockTag Int
 
 deriving newtype instance Num BlockTag
 
--- The spec and the ocaml implementation are inconsistent when defining Case.
--- I'll use the definition (examples) from the spec to guide this implementation.
--- I know I could've used Maybe's here, but not doing so was a concious choice.
---
--- | Used in switch-statements. See
--- <https://github.com/stedolan/malfunction/blob/master/docs/spec.md#conditionals>
 data Case
   -- (tag _)
-  = Deftag
+  = CaseAnyTag
   -- (tag n)
-  | Tag Int
+  | CaseTag Int
   -- _
   | CaseAnyInt
   -- n
   | CaseInt Int
-  -- (n m)
-  | Intrange (Int, Int)
 
 deriving stock instance Show     Case
 deriving stock instance Eq       Case
@@ -160,11 +127,6 @@ deriving stock   instance Typeable Longident
 deriving newtype instance IsList   Longident
 
 
-
--- "The top-level sexp must begin with the atom module, followed by a
--- list of bindings (described under let, below), followed by an sexp
--- beginning with the atom export."
---
 -- | Defines a malfunction module.
 data Mod = MMod [Binding] [Term]
 
@@ -283,11 +245,10 @@ prettyCaseExpression (cs, t) = level (prettyList__ cs) (pretty t)
 
 instance Pretty Case where
   pretty c = case c of
-    Deftag          -> "(tag _)"
-    Tag n           -> "(tag " <> pretty n <> ")"
+    CaseAnyTag          -> "(tag _)"
+    CaseTag n           -> "(tag " <> pretty n <> ")"
     CaseAnyInt      -> "_"
     CaseInt n       -> pretty n
-    Intrange (i, j) -> ("(" <> pretty i) <+> (pretty j <> ")")
 
 instance Pretty UnaryIntOp where
   pretty op = case op of

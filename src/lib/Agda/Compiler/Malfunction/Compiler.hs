@@ -282,7 +282,7 @@ translateTACon tcase (TACon con arity t : ts) = do
 
       cnr <- askConRep con
       let (cs , ind) = case cnr of
-                         BlockRep{conTag = tg , conInd' = ind'} -> (Tag tg , ind')
+                         BlockRep{conTag = tg , conInd' = ind'} -> (CaseTag tg , ind')
                          IntRep{conTag = tg , conInd' = ind'}   -> (CaseInt tg , ind')
 
       -- TODO: It is not clear how to deal with bindings in a pattern
@@ -339,7 +339,7 @@ translateTCase tcase defaultt tas = do
 
 
 defaultCase :: [Case]
-defaultCase = [CaseAnyInt, Deftag]
+defaultCase = [CaseAnyInt, CaseAnyTag]
 
 bindFields :: [Ident] -> Set Int -> Term -> Term -> Induction -> Term
 bindFields vars used termc body ind = case map bind varsRev of
