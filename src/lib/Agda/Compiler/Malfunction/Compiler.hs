@@ -15,7 +15,6 @@ module Agda.Compiler.Malfunction.Compiler
   (
   -- * Translation functions
     translateTerms
-  , translateDef
   , compile
   , runTranslate
   -- * Data needed for compilation
@@ -141,22 +140,6 @@ type Arity = Int
 runTranslate :: Reader Env a -> Env -> a
 runTranslate = runReader
 
-translateDefM :: MonadReader Env m => QName -> TTerm -> m Binding
-translateDefM qnm t
-  | isRecursive = do
-      tt <- translateM t
-      let iden = nameToIdent qnm
-      return . Recursive . pure $ (iden, (qnameToConc qnm , tt))
-  | otherwise = do
-      tt <- translateM t
-      pure $ namedBinding qnm tt
-  where
-    -- TODO: I don't believe this is enough, consider the example
-    -- where functions are mutually recursive.
-    --     a = b
-    --     b = a
-    isRecursive = Set.member (qnameNameId qnm) (qnamesIdsInTerm t) -- TODO: is this enough?
-
 
 mlfTagRange :: (Int, Int)
 mlfTagRange = (0, 199)
@@ -234,13 +217,6 @@ mkCompilerEnv defs = do
   cinfo <- getConstrInfo cns
   pure $ mkCompilerEnv' cinfo
 
-
--- | Translate a single treeless term to a list of malfunction terms.
---
--- Note that this does not handle mutual dependencies correctly. For this you
--- would need @compile@.
-translateDef :: Env -> QName -> TTerm -> Binding
-translateDef env qn = (`runTranslate` env) . translateDefM qn
 
 -- | Translates a list treeless terms to a list of malfunction terms.
 --
