@@ -13,24 +13,8 @@ This module includes functions that compile from <agda.readthedocs.io Agda> to
 {-# OPTIONS_GHC -Wall -Wno-name-shadowing #-}
 module Agda.Compiler.Malfunction.Compiler
   (
-  -- * Translation functions
-    translateTerms
-  , compile
-  , runTranslate
-  -- * Data needed for compilation
-  , Env(..)
-  , ConRep(..)
-  , Arity
-  , Export
-  -- * Others
+  compile
   , qnameNameId
-  , wildcardTerm
-  , namedBinding
-  , nameToIdent
-  , mlfTagRange
-  , compilePrim
-  , mkCompilerEnv
-  , module Agda.Compiler.Malfunction.AST
   ) where
 
 import           Agda.Syntax.Common (NameId(..) , Delayed(..) , Induction(..))
@@ -76,8 +60,6 @@ import           Agda.TypeChecking.Primitive (getBuiltinName)
 import           Agda.TypeChecking.Monad.Builtin
 import           Agda.Utils.Lens
 import           Agda.TypeChecking.Warnings
-
-
 
 
 

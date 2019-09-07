@@ -34,6 +34,7 @@ import           System.IO
 import           Agda.Compiler.Malfunction.AST
 import qualified Agda.Compiler.Malfunction.Compiler  as C
 import           Agda.Compiler.Malfunction.Optimize
+import           Agda.Compiler.Malfunction.Debug
 import           Agda.Compiler.Malfunction.EraseDefs
 import           Agda.Compiler.Malfunction.Pragmas
 import           Agda.Compiler.Malfunction.Primitive
@@ -89,11 +90,10 @@ backend' = Backend' {
   , options = defOptions
   , commandLineFlags = ttFlags
   , isEnabled = optMLF
-  -- Checks if there are metas and aborts if so.
-  , preCompile = mlfPreCompile
-  , postCompile = mlfCompile
+  , preCompile = checkForMetas
+  , postCompile = performCompilation
   , preModule = \_ _ _ fp -> pure $ Recompile fp
-  , compileDef = \_ _ _ def -> mlfCompileDef def
+  , compileDef = \_ _ _ def -> createTreeless def
   , postModule = \_ _ _ _ defs -> pure $ catMaybes defs 
   , backendVersion = Just "0.0.1"
   , scopeCheckingSuffices = False
@@ -112,12 +112,12 @@ ocamlMayEraseType q = do
 
 -- Create the treeless Term here, so that we use the pragma options of the file
 -- the definition comes from.
-mlfCompileDef :: Definition -> TCM (Maybe Definition)
-mlfCompileDef (Defn{defName = q , defArgInfo = info , defNoCompilation = noC}) | (isIrrelevant info || noC) = do
+createTreeless :: Definition -> TCM (Maybe Definition)
+createTreeless (Defn{defName = q , defArgInfo = info , defNoCompilation = noC}) | (isIrrelevant info || noC) = do
   reportSDoc "compile.ghc.definition" 10 $
            pure $ text "Not compiling" <+> (pretty q <> text ".")
   pure Nothing
-mlfCompileDef def@Defn{defName = q} = do
+createTreeless def@Defn{defName = q} = do
   case (theDef def) of
     Function{} -> do _ <- toTreeless EagerEvaluation q
                      pure ()
@@ -125,56 +125,11 @@ mlfCompileDef def@Defn{defName = q} = do
   pure $ Just def
 
 
-mlfPreCompile :: MlfOptions -> TCM MlfOptions
-mlfPreCompile mlfOpts = do
+checkForMetas :: MlfOptions -> TCM MlfOptions
+checkForMetas mlfOpts = do
   allowUnsolved <- optAllowUnsolved <$> pragmaOptions
-  when allowUnsolved $ genericError "Unsolved meta variables are not allowed when compiling."
+  when allowUnsolved $ typeError $ CompilationError "Unsolved meta variables are not allowed when compiling."
   return mlfOpts
-
-
-
-
--- TODO Needs review.
-definitionSummary :: MlfOptions -> Definition -> TCM ()
-definitionSummary opts def = when (optDebugMLF opts) $ do
-  liftIO (putStrLn ("Summary for: " ++ show q))
-  liftIO $ putStrLn $ unlines [
-    show (defName def)
-      ++ "  (" ++ show (C.qnameNameId q)++ "), " ++ defntype
-    ]
-  case theDef def of
-    Function{} ->
-      whenJustM (toTreeless EagerEvaluation q) $
-        \tt ->
-          liftIO . putStrLn . render
-          $  header '=' (show q)
-          $$ sect "Treeless (abstract syntax)"    (text . show $ tt)
-          $$ sect "Treeless (concrete syntax)"    (pretty tt)
-    _ -> return ()
-    where
-      sect t dc = text t $+$ nest 2 dc $+$ text ""
-      header c h = let cs = replicate 15 c
-                   in text $ printf "%s %s %s" cs h cs
-      q = defName def
-      defntype = case theDef def of
-        Constructor{}      -> "constructor"
-        Primitive{}        -> "primitive"
-        Function{}         -> "function"
-        Datatype{}         -> "datatype"
-        Record{}           -> "record"
-        AbstractDefn{}     -> "abstract"
-        Axiom{}            -> "axiom"
-        GeneralizableVar{} -> error "TODO"
-        DataOrRecSig{}     -> error "TODO"
-
-
-
-
-  
-
-
-
-
 
 
 
@@ -191,17 +146,15 @@ outFile m = do
 
 
 
-mlfCompile :: MlfOptions -> IsMain -> Map ModuleName [Definition] -> TCM ()
-mlfCompile opts _ mods = do
+performCompilation :: MlfOptions -> IsMain -> Map ModuleName [Definition] -> TCM ()
+performCompilation opts _ mods = do
   agdaMod <- curMName
   let outputName = case mnameToList agdaMod of
                     [] -> error "Impossible"
                     ms -> last ms
   (mdir , _ , fp) <- outFile (mnameToList agdaMod)
 
-  -- TODO review ?? Report debugging Information 
-  mapM_ (definitionSummary opts) (map snd allDefs)
-
+  when (optDebugMLF opts) $ mapM_ definitionSummary (map snd allDefs)
   
   let returnLib = optMLFLib opts
   (mod , exs) <- analyzeCode allDefs returnLib
@@ -259,7 +212,7 @@ analyzeCode defs rl = do
     let (im , bs) = eraseB bss (if rl then Just (map fst exs) else Nothing)
     
     case (im == NotMain) && (not rl) of
-      True -> genericError
+      True -> typeError $ CompilationError
             ("No main function defined in " ++ (show . pretty) agdaMod ++ " .")
       False -> pure ()
       

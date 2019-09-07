@@ -90,7 +90,7 @@ parsePragma (CompilerPragma r s) =
 parseOCamlPragma :: CompilerPragma -> TCM OCamlPragma
 parseOCamlPragma p = setCurrentRange p $
   case parsePragma p of
-    Left err -> genericError err
+    Left err -> typeError $ CompilationError err
     Right p -> return p
 
 
