@@ -23,6 +23,7 @@ library
   exposed-modules:     Agda.Compiler.Malfunction
   other-modules:       Agda.Compiler.Malfunction.AST
                      , Agda.Compiler.Malfunction.Compiler
+                     , Agda.Compiler.Malfunction.TreelessToAST
                      , Agda.Compiler.Malfunction.Debug
                      , Agda.Compiler.Malfunction.EraseDefs
                      , Agda.Compiler.Malfunction.Optimize
