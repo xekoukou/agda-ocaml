@@ -7,22 +7,22 @@ import Data.List
 import qualified Data.Map.Strict as M
 import qualified Data.Generics.Uniplate.Data as Uniplate
 
-findAllIdents :: [Binding] -> [(Ident , Term)]
-findAllIdents (Named id t : xs) = (id , t) : findAllIdents xs
+findAllIdents :: [Binding] -> [(Ident , (String , Term))]
+findAllIdents (Named id cn t : xs) = (id , (cn , t)) : findAllIdents xs
 findAllIdents (Recursive ys : xs) = ys ++ findAllIdents xs
 findAllIdents (_ : xs) = findAllIdents xs
 findAllIdents [] = []
 
 
-findMain :: [(Ident , Term)] -> Maybe (Ident , Term)
-findMain ms = let fms = filter (\(Ident x , _t) -> "main" `isSuffixOf` x) ms
+findMain :: [(Ident , (String , Term))] -> Maybe (Ident , (String , Term))
+findMain ms = let fms = filter (\(_ , (x , _)) -> "main" `isSuffixOf` x) ms
               in case fms of
                   [] -> Nothing
                   [x] -> Just x
                   (_ : _) -> error "Multiple functions with the name main exist."
 
 
-findAllUsedBindings :: M.Map Ident Term -> Term -> M.Map Ident Term
+findAllUsedBindings :: M.Map Ident (String , Term) -> Term -> M.Map Ident (String , Term)
 findAllUsedBindings env0 t0 = snd $ foldr g (nEnv , newItems) nid
   where
   nid' = concatMap f $ findUsedIdents t0
@@ -34,7 +34,7 @@ findAllUsedBindings env0 t0 = snd $ foldr g (nEnv , newItems) nid
     _ -> []
   g (_ , t) (env , items) = (M.difference env ni , M.union ni items)
     where
-    ni = findAllUsedBindings env t
+    ni = findAllUsedBindings env (snd t)
 
 -- The list is greater than the global lists because we have local identifiers.
 findUsedIdents :: Term -> [Ident]
@@ -64,10 +64,10 @@ findUsedIdents = foldMap step . Uniplate.universe
     Mforce{}           -> mempty
 
 
--- TODO This is inefficient, second argument should be a map with the previous used bindings removed.
-initFAU :: (Ident, Term) -> M.Map Ident Term -> (M.Map Ident Term , M.Map Ident Term)
-initFAU b allIds = let env = M.delete (fst b) allIds
-                       newItems = findAllUsedBindings env (snd b)
+initFAU :: (Ident, (String , Term)) -> M.Map Ident (String , Term) -> (M.Map Ident (String , Term) , M.Map Ident (String , Term))
+initFAU (i , (_ , t)) allIds
+                 = let env = M.delete i allIds
+                       newItems = findAllUsedBindings env t
                    in (M.difference env newItems , newItems)
 
 
@@ -79,7 +79,9 @@ eraseB :: [Binding] -> Maybe [Ident] -> (IsMain , [Binding])
 eraseB _ (Just []) = (NotMain , [])
 eraseB bs (Just exids) =
   let allIds = findAllIdents bs
-      exs = foldr (\x y -> y ++ maybe [] (\t -> [(x , t)]) (lookup x allIds)) [] exids
+      exs = foldr (\x y -> case (lookup x allIds) of
+                             Just q -> (x , q) : y
+                             nothing -> y ) [] exids
       ubs = foldr (\x (env , y) -> let (nenv , nitems) = initFAU x env
                                    in (nenv , M.union y nitems) ) (M.fromList allIds , M.empty) exs
   in (NotMain , foldr (orderB (M.union (snd $ ubs) (M.fromList exs))) [] bs)
@@ -87,7 +89,7 @@ eraseB bs Nothing =
   case findMain allIds of
     Just main ->
       let ubs = snd $ initFAU main (M.fromList allIds)
-      in (IsMain , (foldr (orderB ubs) [] bs) ++ [Named (Ident "main") (Mapply (Mglobal run) [Mapply (snd main) [unitT]])])
+      in (IsMain , (foldr (orderB ubs) [] bs) ++ [Named (Ident "main") "MMain" (Mapply (Mglobal run) [Mapply (snd (snd main)) [unitT]])])
     -- We return nothing because we will throw an error.
     Nothing -> (NotMain , [])
   where
@@ -96,9 +98,9 @@ eraseB bs Nothing =
 
 
 
-orderB :: M.Map Ident Term -> Binding -> [Binding] -> [Binding]
+orderB :: M.Map Ident (String , Term) -> Binding -> [Binding] -> [Binding]
 orderB allUM x osum = case x of
-  Named id _t ->
+  Named id cn _t ->
     case M.lookup id allUM of
       Just _ -> x : osum
       _ -> osum

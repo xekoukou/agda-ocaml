@@ -246,8 +246,8 @@ deriving stock instance Typeable Term
 --                  bindings, and the body.
 data Binding
   = Unnamed Term -- Where is unnamed used?
-  | Named Ident Term
-  | Recursive [(Ident, Term)]
+  | Named Ident String Term
+  | Recursive [(Ident, (String , Term))]
 
 deriving stock instance Show     Binding
 deriving stock instance Eq       Binding
@@ -309,11 +309,11 @@ instance Pretty Term where
 instance Pretty Binding where
   pretty b = case b of
     Unnamed t    -> level "_" (pretty t)
-    Named i t    -> level (pretty i) (pretty t)
+    Named i cn t    -> text ("; " ++ cn ++ "\n") <+> level (pretty i) (pretty t)
     Recursive bs -> levelPlus "rec" (map showIdentTerm bs)
     where
-      showIdentTerm :: (Ident, Term) -> Doc
-      showIdentTerm (i, t) = level (pretty i) (pretty t)
+      showIdentTerm :: (Ident, (String , Term)) -> Doc
+      showIdentTerm (i, (cn , t)) = text ("; " ++ cn ++ "\n") <+> level (pretty i) (pretty t)
 
 instance Pretty IntConst where
   pretty ic = case ic of

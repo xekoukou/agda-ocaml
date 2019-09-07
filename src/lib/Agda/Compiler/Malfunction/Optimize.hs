@@ -25,8 +25,8 @@ replaceTr rt ar self@(Mlet bs t) =  caseEq rt ar self $  let nt = replaceTr rt a
                                        in Mlet (map (rpl rt ar) bs) nt where
   rpl :: Term -> Term -> Binding -> Binding
   rpl rt ar (Unnamed t) = Unnamed $ replaceTr rt ar t
-  rpl rt ar (Named x t) = Named x $ replaceTr rt ar t
-  rpl rt ar (Recursive rs) = Recursive (zipWith (\x y -> (fst x , y)) rs (map (replaceTr rt ar . snd) rs))
+  rpl rt ar (Named x cn t) = Named x cn $ replaceTr rt ar t
+  rpl rt ar (Recursive rs) = Recursive (zipWith (\(ix , (cnx , tx)) y -> (ix , (cnx , y))) rs (map (replaceTr rt ar . snd . snd) rs))
 replaceTr rt ar self@(Mswitch ta tb) =  caseEq rt ar self $
                                           let nta = replaceTr rt ar ta
                                               ntb = map (replaceTr rt ar . snd) tb
@@ -90,7 +90,7 @@ removeLets (Mlet bs t) =  let mt = replaceTrL (map rpl bs) t
                           in nt where
   rpl :: Binding -> (Term , Term)
   rpl (Unnamed t) = error "Let bindings should have a name."
-  rpl (Named x t) = (Mvar x , t)
+  rpl (Named x _ t) = (Mvar x , t)
   rpl (Recursive rs) = error "Let bindings cannot be recursive."
   
 removeLets (Mswitch ta tb) = let nta = removeLets ta
@@ -135,7 +135,7 @@ removeLets x =  x
 
 createBinds :: [(String , Term)] -> [Binding]
 createBinds [] = []
-createBinds ((var , term) : ns) = Named (Ident var) term : createBinds ns
+createBinds ((var , term) : ns) = Named (Ident var) var term : createBinds ns
 
 -- Second Term is the initial one and we need it to use it as a key, so we pass it at the result.
 replaceRec :: [(Integer , Term , Term)] -> UIDState [(String , (Integer , Term , Term))]
@@ -322,15 +322,15 @@ removeLetsVar (Mapply a bs) = let (na : nbs) = map removeLetsVar (a : bs)
                               in Mapply na nbs 
 removeLetsVar (Mlet bs t) = let (trm , tkp) = partitionEithers (map rpl bs)
                                 mt = foldr (\x y -> replaceTr (fst x) (snd x) y) t trm
-                                ntkp = foldr (\x y -> map (\(Named id t) -> Named id (replaceTr (fst x) (snd x) t )) y) tkp trm
+                                ntkp = foldr (\x y -> map (\(Named id cn t) -> Named id cn (replaceTr (fst x) (snd x) t )) y) tkp trm
                                 nt = removeLetsVar mt
                             in (case ntkp of
                                         [] -> nt
                                         _  -> Mlet ntkp nt)         where
   rpl :: Binding -> Either (Term , Term) Binding
   rpl (Unnamed t) = error "Let bindings should have a name."
-  rpl (Named x (Mvar y)) = Left (Mvar x , Mvar y)
-  rpl self@(Named x t) = Right self
+  rpl (Named x _ (Mvar y)) = Left (Mvar x , Mvar y)
+  rpl self@(Named x _ t) = Right self
   rpl (Recursive rs) = error "Let bindings cannot be recursive."
   
 removeLetsVar (Mswitch ta tb) = let nta = removeLetsVar ta
@@ -383,16 +383,13 @@ optimizeLets (Mblock tag tms) = Mblock tag (map (removeLetsVar . introduceLets .
 optimizeLets r = r
 
 perfOptB :: (Term -> Term) -> [Binding] -> [Binding]
-perfOptB f (Named id t : bs) = Named id (f t) : perfOptB f bs
-perfOptB f (Recursive ys : bs) = Recursive (zip (map fst ys) (map (f . snd) ys)) : perfOptB f bs
+perfOptB f (Named id cn t : bs) = Named id cn (f t) : perfOptB f bs
+perfOptB f (Recursive ys : bs) = Recursive (map (\(i , (cn , t)) -> (i , (cn , f t))) ys) : perfOptB f bs
 perfOptB f (_ : bs) = error "Unnamed binding?"
 perfOptB f [] = []
 
 optimizeLetsB :: [Binding] -> [Binding]
-optimizeLetsB (Named id t : bs) = Named id (optimizeLets t) : optimizeLetsB bs
-optimizeLetsB (Recursive ys : bs) = Recursive (zip (map fst ys) (map (optimizeLets . snd) ys)) : optimizeLetsB bs
-optimizeLetsB (_ : bs) = error "Unnamed binding?"
-optimizeLetsB [] = []
+optimizeLetsB bs = perfOptB optimizeLets bs
 
 
 -- Erasure of all unnecessary code.

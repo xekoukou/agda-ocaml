@@ -146,7 +146,7 @@ translateDefM qnm t
   | isRecursive = do
       tt <- translateM t
       let iden = nameToIdent qnm
-      return . Recursive . pure $ (iden, tt)
+      return . Recursive . pure $ (iden, (qnameToConc qnm , tt))
   | otherwise = do
       tt <- translateM t
       pure $ namedBinding qnm tt
@@ -163,7 +163,8 @@ mlfTagRange = (0, 199)
 
 
 
-
+-- Concrete names are affected by renaming
+-- and thus should not be used in the identity.
 qnameToConc :: QName -> String
 qnameToConc qnm = concreteName qnm where
     toValid :: Char -> String
@@ -262,8 +263,8 @@ translateTerm = \case
   TCon nm           -> translateCon nm
   TLet t0 t1        -> do
     t0' <- translateTerm t0
-    (var, t1') <- introVar (translateTerm t1)
-    return (Mlet [Named var t0'] t1')
+    (Ident var, t1') <- introVar (translateTerm t1)
+    return (Mlet [Named (Ident var) var t0'] t1')
   -- @deflt@ is the default value if all @alt@s fail.
 
 -- TODO Handle the case where this is a lazy match if possible.
@@ -281,12 +282,12 @@ translateTerm = \case
                                     -- TODO: We can probably erase these , but we would have to change 
                                     -- the functions that use them , reduce their arity.
                                     -- For now, we simply pass the unit type.
-  TError TUnreachable -> return wildcardTerm
+  TError TUnreachable -> return (wildcardTerm "__UNREACHABLE__")
   TCoerce{}         -> error "Malfunction.Compiler.translateTerm: TODO"
 
 -- | We use this when we don't care about the translation.
-wildcardTerm :: Term
-wildcardTerm = Prim.errorT "__UNREACHABLE__"
+wildcardTerm :: String -> Term
+wildcardTerm s = Prim.errorT s
 
 
 indexToVarTerm :: MonadReader Env m => Int -> m Term
@@ -370,14 +371,14 @@ bindFields vars used termc body ind = case map bind varsRev of
   binds -> Mlet binds body
   where
     varsRev = zip [0..] (reverse vars)
-    bind (ix, iden)
+    bind (ix, Ident iden)
       -- TODO: we bind all fields. The detection of used fields is bugged.
       | True || Set.member ix used =
         case ind of
-          Inductive -> Named iden (Mfield ix termc)
-          CoInductive -> Named iden (Mfield ix (Mforce termc))
+          Inductive -> Named (Ident iden) iden (Mfield ix termc)
+          CoInductive -> Named (Ident iden) iden (Mfield ix (Mforce termc))
 
-      | otherwise = Named iden wildcardTerm
+      | otherwise = Named (Ident iden) iden (wildcardTerm iden)
 
 -- t here is (Var i)
 litToCase :: Term -> Literal -> Term
@@ -567,12 +568,11 @@ translateName qn = Mvar (nameToIdent qn)
 
 
 nameToIdent :: QName -> Ident
-nameToIdent qn = nameIdToIdent' (qnameNameId qn) (qnameToConc qn)
+nameToIdent qn = nameIdToIdent' (qnameNameId qn)
 
-nameIdToIdent' :: NameId -> String -> Ident
-nameIdToIdent' (NameId a b) msuffix = Ident ("agdaIdent" ++ hex a ++ "." ++ hex b ++ suffix)
+nameIdToIdent' :: NameId -> Ident
+nameIdToIdent' (NameId a b) = Ident ("agdaIdent" ++ hex a ++ "." ++ hex b)
   where
-    suffix = ('.':) msuffix
     hex = (`showHex` "") . toInteger
 
 
@@ -606,7 +606,7 @@ compilePrim q s = case x of
     x = Map.lookup s Prim.primitives
 
 namedBinding :: QName -> Term -> Binding
-namedBinding q t = (`Named`t) $ nameToIdent q
+namedBinding q t = Named (nameToIdent q) (qnameToConc q) t
 
 
 
@@ -711,22 +711,24 @@ wIOFunction def self@(id , t) = do
         _ -> pure self
     _ -> __IMPOSSIBLE__
 
-handleFunction :: Env -> (ModuleName , Definition) -> TCM (Maybe (Ident , Term))
-handleFunction env (mn , def) = do
+handleFunction :: Env -> (ModuleName , Definition) -> TCM (Maybe (Ident , (String , Term)))
+handleFunction env (mn , def@Defn{defName = q}) = do
   r <- handlePragma mn def
   case r of
     Nothing -> pure Nothing
-    Just (Right bs) -> Just <$> wIOFunction def bs 
+    Just (Right bs) -> Just <$> addCn <$> wIOFunction def bs 
     Just (Left _) -> do
       b <- handleFunctionNoPragma env def 
-      maybe (pure Nothing) (\x -> Just <$> wIOFunction def x) b
+      maybe (pure Nothing) (\x -> Just <$> addCn <$> wIOFunction def x) b
+  where
+    addCn = (\(i , t) -> (i , (qnameToConc q , t)))
 
 
 handleFunctions :: Env -> [(ModuleName , Definition)] -> TCM [Binding]
 handleFunctions env allDefs = do
   let (others , fns) = splitPrim allDefs
   os <- mapM (handleFunction env) others
-  let obs = map (\x -> Named (fst x) (snd x)) (catMaybes os)
+  let obs = map (\x -> Named (fst x) (fst (snd x)) (snd (snd x))) (catMaybes os)
   qts <- mapM (\(mn , x) -> do
                   let q = defName x
                   noC <- defNoCompilation <$> getConstInfo q
@@ -742,7 +744,7 @@ handleFunctions env allDefs = do
       AcyclicSCC single -> do
         def <- getConstInfo (fst single)
         rs <- handleFunction env ((fst (snd single)) , def)
-        pure $ maybe Nothing (\x -> Just $ Named (fst x) (snd x)) rs
+        pure $ maybe Nothing (\x -> Just $ Named (fst x) (fst (snd x)) (snd (snd x))) rs
       CyclicSCC grp -> do
         defs <- mapM (getConstInfo . fst) grp
         let mns = map (fst . snd) grp
