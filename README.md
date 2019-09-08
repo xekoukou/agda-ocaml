@@ -49,9 +49,10 @@ The ```stack``` package manager is also required to perform the installation.
 
 ## Limitations
 
-Currently , there is no support for float types or the reflection primitives.
+  Currently , there is no support for float types or the reflection primitives.
+  For float types, this is intentional, since anyone could use the FFI to perform computations on float types.
 
-For float types, this is intentional, since anyone could use the FFI to perform computations on float types.
+  The ```PSeq``` primitive is not respected. The evaluation order could be different.
 
 ## Important Notice
 

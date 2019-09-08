@@ -67,6 +67,18 @@ import           Agda.Utils.Lens
 import           Agda.TypeChecking.Warnings
 
 
+nameToIdent :: QName -> Ident
+nameToIdent qn = nameIdToIdent' (qnameNameId qn)
+  where
+    nameIdToIdent' :: NameId -> Ident
+    nameIdToIdent' (NameId a b) = Ident ("agdaIdent" ++ hex a ++ "." ++ hex b)
+      where
+        hex = (`showHex` "") . toInteger
+
+
+-- | Translates a treeless identifier to a malfunction identifier.
+qnameNameId :: QName -> NameId
+qnameNameId = nameId . qnameName
 
 
 
@@ -141,25 +153,74 @@ constructEnv defs = do
   
 
 
+-- The new idents are determined according to the level we are now.
+introVars :: MonadReader Env m => Int -> m a -> m ([Ident], a)
+introVars k ma = do
+  (names, env') <- nextIdxs k
+  r <- local (const env') ma
+  return (names, r)
+  where
+    nextIdxs :: MonadReader Env m => Int -> m ([Ident], Env)
+    nextIdxs k' = do
+      i0 <- asks level
+      e <- ask
+      return (map ident $ reverse [i0..i0 + k' - 1], e{level = i0 + k'})
+
+introVar :: MonadReader Env m => m a -> m (Ident, a)
+introVar ma = first head <$> introVars 1 ma
 
 
+ident :: Int -> Ident
+ident i = Ident $ "v" ++ show i
 
-  
+dbIndexToMvar :: MonadReader Env m => Int -> m Term
+dbIndexToMvar i = do
+  ni <- asks level
+  return (Mvar (ident (ni - i - 1)))
 
 
--- | Translates a list treeless terms to a list of malfunction terms.
---
--- Pluralized version of @translateDef@.
-translateTerms :: Env -> [TTerm] -> [Term]
-translateTerms env = (`runTranslate` env) . mapM translateM
+translatePrim :: TPrim -> Term
+translatePrim tp =
+  case tp of
+    PAdd -> intbinop TBigint Add
+    PSub -> intbinop TBigint Sub
+    PMul -> intbinop TBigint Mul
+    PQuot -> intbinop TBigint Div
+    PRem -> intbinop TBigint Mod
+    PGeq -> intbinop TBigint Gte
+    PLt -> intbinop TBigint Lt
+    PEqI -> intbinop TBigint Eq
+    PEqF -> wrong
+    PEqS -> wrong
+    PEqC -> wrong
+    PEqQ -> wrong
+    PIf -> wrong
+    -- PSeq is not respected. The evaluation could be different.
+    -- Supporting it requires a big overhaul of how we introduce let statements and
+    -- we need to be sure that betareduction has been performed.
+    PSeq -> Mlambda ["a" , "b"] (Mvar "b")
+-- OCaml does not support unsigned Integers.
+    PAdd64 -> notSupported
+    PSub64 -> notSupported
+    PMul64 -> notSupported
+    PQuot64 -> notSupported
+    PRem64 -> notSupported
+    PLt64 -> notSupported
+    PEq64 -> notSupported
+    PITo64 -> notSupported
+    P64ToI -> notSupported
+  where
+    intbinop typ op = Mlambda ["a" , "b"] $ Mbiop op typ (Mvar "a") (Mvar "b")
+    notSupported = Prim.errorT "Not supported by the OCaml backend."
+    wrong = undefined
 
-translateM :: MonadReader Env m => TTerm -> m Term
-translateM = translateTerm
+translateName :: QName -> Term
+translateName qn = Mvar (nameToIdent qn)
 
 
 translateTerm :: MonadReader Env m => TTerm -> m Term
 translateTerm = \case
-  TVar i            -> indexToVarTerm i
+  TVar i            -> dbIndexToMvar i
   TPrim tp          -> return $ translatePrim tp
   TDef name         -> pure $ translateName name
   TApp t0 args      -> translateApp t0 args
@@ -170,15 +231,13 @@ translateTerm = \case
     t0' <- translateTerm t0
     (Ident var, t1') <- introVar (translateTerm t1)
     return (Mlet [Named (Ident var) var t0'] t1')
-  -- @deflt@ is the default value if all @alt@s fail.
-
--- TODO Handle the case where this is a lazy match if possible.
---     case (caseLazy cinfo) of
---       True -> pure $ error "caseLazy error."
---       False -> do
-
-  TCase i _ deflt alts -> do
-      t <- indexToVarTerm i
+  TCase i cinfo deflt alts ->
+-- TODO Handle the case where this is not a lazy match if possible.
+--    case (caseLazy cinfo) of
+--      True -> pure $ error "caseLazy error."
+--      False -> return ()
+    do
+      t <- dbIndexToMvar i
       d <- translateTerm deflt
       translateTCase t d alts
   TUnit             -> return Prim.unitT
@@ -195,10 +254,6 @@ wildcardTerm :: String -> Term
 wildcardTerm s = Prim.errorT s
 
 
-indexToVarTerm :: MonadReader Env m => Int -> m Term
-indexToVarTerm i = do
-  ni <- asks level
-  return (Mvar (ident (ni - i - 1)))
 
 
 
@@ -310,37 +365,18 @@ translateLam lam = do
       return ([], e')
 
 
-
-introVars :: MonadReader Env m => Int -> m a -> m ([Ident], a)
-introVars k ma = do
-  (names, env') <- nextIdxs k
-  r <- local (const env') ma
-  return (names, r)
-  where
-    nextIdxs :: MonadReader Env m => Int -> m ([Ident], Env)
-    nextIdxs k' = do
-      i0 <- asks level
-      e <- ask
-      return (map ident $ reverse [i0..i0 + k' - 1], e{level = level e + k'})
-
-introVar :: MonadReader Env m => m a -> m (Ident, a)
-introVar ma = first head <$> introVars 1 ma
-
 -- This is also used to place the Mlazy in the correct place.
 betareduction :: (Term , [Term]) -> Term
-betareduction ((Mlambda ids t) , xs) = hp ids t xs
-  where
-    hp (id : ids) t (x : xs) = hp ids (replaceTr (Mvar id) x t) xs
-    hp [] t (x : xs) = Mapply t (x : xs)
-    hp (id : ids) t [] = Mlambda (id : ids) t
-    hp [] t [] = t
-betareduction (Mlazy (Mlambda ids t) , xs) = Mlazy $ hp ids t xs
-  where
-    hp (id : ids) t (x : xs) = hp ids (replaceTr (Mvar id) x t) xs
-    hp [] t (x : xs) = Mapply t (x : xs)
-    hp (id : ids) t [] = Mlambda (id : ids) t
-    hp [] t [] = t
-betareduction (t , xs) = Mapply t xs
+betareduction = betareduction' where
+  brhp (id : ids) t (x : xs) = brhp ids (replaceTr (Mvar id) x t) xs
+  brhp [] t (x : xs)         = betareduction (t , (x : xs))
+  brhp (id : ids) t []       = Mlambda (id : ids) t
+  brhp [] t []               = t
+  
+  betareduction' :: (Term , [Term]) -> Term
+  betareduction' ((Mlambda ids t) , xs) = brhp ids t xs
+  betareduction' (Mlazy (Mlambda ids t) , xs) = Mlazy $ brhp ids t xs
+  betareduction' (t , xs) = Mapply t xs
 
 translateApp :: MonadReader Env m => TTerm -> [TTerm] -> m Term
 translateApp ft xst =
@@ -349,8 +385,6 @@ translateApp ft xst =
     xs <- mapM translateTerm xst
     pure $ betareduction (f , xs)
 
-ident :: Int -> Ident
-ident i = Ident $ "v" ++ show i
 
 translateLit :: Literal -> Term
 translateLit l = case l of
@@ -358,40 +392,6 @@ translateLit l = case l of
   LitString _ s -> Mstring s
   LitChar _ c -> Mint $ CInt (fromEnum c)
   _ -> Prim.errorT "unsupported literal type" 
-
-translatePrim :: TPrim -> Term
-translatePrim tp =
-  case tp of
-    PAdd -> intbinop TBigint Add
-    PSub -> intbinop TBigint Sub
-    PMul -> intbinop TBigint Mul
-    PQuot -> intbinop TBigint Div
-    PRem -> intbinop TBigint Mod
-    PGeq -> intbinop TBigint Gte
-    PLt -> intbinop TBigint Lt
-    PEqI -> intbinop TBigint Eq
-    PEqF -> wrong
-    PEqS -> wrong
-    PEqC -> wrong
-    PEqQ -> wrong
-    PIf -> wrong
-    PSeq -> Mlambda ["a" , "b"] $ Mseq [ (Mvar "a") , (Mvar "b") ]
--- OCaml does not support unsigned Integers.
-    PAdd64 -> notSupported
-    PSub64 -> notSupported
-    PMul64 -> notSupported
-    PQuot64 -> notSupported
-    PRem64 -> notSupported
-    PLt64 -> notSupported
-    PEq64 -> notSupported
-    PITo64 -> notSupported
-    P64ToI -> notSupported
-  where
-    intbinop typ op = Mlambda ["a" , "b"] $ Mbiop op typ (Mvar "a") (Mvar "b")
-    
-    -- TODO The RedBlack.agda test gave 3 args in pseq where the last one was unreachable.
-    notSupported = Prim.errorT "Not supported by the OCaml backend."
-    wrong = undefined
 
 
 
@@ -438,10 +438,12 @@ translateCon nm = do
       case cnr of
         BlockRep{conTag = tag , conArity' = arity , conInd' = conInd} -> do
           let vs = take arity $ map (Ident . pure) ['a'..]
+          let r = Mlambda vs (Mblock tag (map Mvar vs))
           case conInd of
-            Inductive -> pure $ Mlambda vs (Mblock tag (map Mvar vs))
-            -- The Mlazy is incorrectly placed here, but betareduction and "let elimination" will fix this.
-            CoInductive -> pure $ Mlazy $ Mlambda vs (Mblock tag (map Mvar vs))
+            Inductive -> pure r
+            -- IMPORTANT The Mlazy is incorrectly placed here
+            -- , but betareduction and "let elimination" will fix this.
+            CoInductive -> pure $ Mlazy r
         IntRep{conTag = tag} -> pure $  Mint $ CInt tag
 
 
@@ -457,23 +459,12 @@ askConRep q = fromMaybe err <$> lookupConRep q
 
 
 
-translateName :: QName -> Term
-translateName qn = Mvar (nameToIdent qn)
 
 
-nameToIdent :: QName -> Ident
-nameToIdent qn = nameIdToIdent' (qnameNameId qn)
-  where
-    nameIdToIdent' :: NameId -> Ident
-    nameIdToIdent' (NameId a b) = Ident ("agdaIdent" ++ hex a ++ "." ++ hex b)
-      where
-        hex = (`showHex` "") . toInteger
 
 
--- | Translates a treeless identifier to a malfunction identifier.
-qnameNameId :: QName -> NameId
-qnameNameId = nameId . qnameName
-
+trueCase :: [Case]
+trueCase = [CaseInt 1]
 
 
 translateBindingPair :: MonadReader Env m => QName -> TTerm -> m (Ident, Term)
@@ -483,6 +474,4 @@ translateBindingPair q t = do
 
 
 
-trueCase :: [Case]
-trueCase = [CaseInt 1]
 

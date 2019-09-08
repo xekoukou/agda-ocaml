@@ -221,7 +221,7 @@ findCF  (Mfield x t) =   do (tms , nself) <- findCF  t
 findCF  self@(Mforce _)  = do noid <- newOID
                               pure (M.insert self (self , noid , False) M.empty , self)
 
--- lazy evaluated expressions should not introduce lets statements.
+-- IMPORTANT lazy evaluated expressions should not introduce lets statements.
 findCF  x = pure (M.empty , x)
 
 
