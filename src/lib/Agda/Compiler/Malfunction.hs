@@ -217,7 +217,7 @@ analyzeCode defs rl = do
       False -> pure ()
       
     let rbs = optimizeLetsB bs
-    pure (MMod rbs (map (Mvar . fst) exs) , map snd exs)
+    pure (MMod bs (map (Mvar . fst) exs) , map snd exs)
 
 
 

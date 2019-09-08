@@ -251,7 +251,8 @@ wildcardTerm :: String -> Term
 wildcardTerm s = Prim.errorT s
 
 
-
+trueCase :: [Case]
+trueCase = [CaseInt 1]
 
 defaultCase :: [Case]
 defaultCase = [CaseAnyInt, CaseAnyTag]
@@ -302,7 +303,6 @@ translateTAGuard (TAGuard grd t) = do
 translateTAGuard _ = __IMPOSSIBLE__
 
   
--- TODO Review this code.
 translateTACon :: MonadReader Env m => Term -> [TAlt] -> m ([TAlt] , ([([Case] , Term)] , Induction))
 translateTACon tcase (TACon con arity t : ts) = do
       (vars, t') <- introVars arity (translateTerm t)
@@ -312,7 +312,6 @@ translateTACon tcase (TACon con arity t : ts) = do
                          BlockRep{conTag = tg , conInd' = ind'} -> (CaseTag tg , ind')
                          IntRep{conTag = tg , conInd' = ind'}   -> (CaseInt tg , ind')
 
-      -- TODO: It is not clear how to deal with bindings in a pattern
       (rmalts , (rmcs , ind2)) <- translateTACon tcase ts
       
       let aind = allInd ind ind2
@@ -327,23 +326,45 @@ translateTACon _ ts = pure (ts , ([] , Inductive))
 
 
 translateLitOrGuard :: MonadReader Env m => Term -> [TAlt] -> m [(Term , Term)]
-translateLitOrGuard tcase (c@(TALit _ _) : ts) = do
-  r <- translateTALit tcase c
-  rs <- translateLitOrGuard tcase ts
-  pure $ r : rs
 translateLitOrGuard tcase (c@(TAGuard _ _) : ts) = do
   r <- translateTAGuard c
+  rs <- translateLitOrGuard tcase ts
+  pure $ r : rs
+translateLitOrGuard tcase (c@(TALit _ _) : ts) = do
+  r <- translateTALit tcase c
   rs <- translateLitOrGuard tcase ts
   pure $ r : rs
 translateLitOrGuard _ [] = pure []
 translateLitOrGuard _ _ = __IMPOSSIBLE__
 
+
 boolCases :: Term -> [(Term , Term)] -> Term
 boolCases defaultt ((grd , body) : cs) = Mswitch grd [(trueCase , body) , (defaultCase , boolCases defaultt cs)]
 boolCases defaultt [] = defaultt
 
--- tcase is (Var i)
--- default is the default case , in case all other fail.
+
+-- -- tcase is (Var i)
+-- -- default is the default case , in case all other fail.
+-- translateTCase1 :: MonadReader Env m => Term -> Term -> [TAlt] -> m Term
+-- translateTCase1 tcase defaultt tas = do
+--   case initTACon tas of
+--     (sm , os) -> do
+--                    r <- map translateTAConS tcase sm
+--                    let w = fst r
+--                    let aind = allInd (snd r)
+--             
+--     ([] , os) -> _
+--   where
+--     initTACon (ta@(TACon _ _ _) : xs) = let (mr , os) = initTACon xs in (ta : mr , os)
+--     initTACon xs = ([] , xs)
+--     initTALit (ta@(TALit _ _) : xs) = let (mr , os) = initTALit xs in (ta : mr , os)
+--     initTALit xs = ([] , xs)
+--     initTAGuard (ta@(TAGuard _ _) : xs) = let (mr , os) = initTAGuard xs in (ta : mr , os)
+--     initTAGuard xs = ([] , xs)
+--     allInd (x : []) = x
+--     allInd (Inductive : xs) = allInd xs
+--     allInd [] = __IMPOSSIBLE__
+    
 translateTCase :: MonadReader Env m => Term -> Term -> [TAlt] -> m Term
 translateTCase tcase defaultt tas = do
   (rmAlts , (cs , ind)) <-translateTACon tcase tas
@@ -439,8 +460,6 @@ askConRep q = fromMaybe err <$> lookupConRep q
 
 
 
-trueCase :: [Case]
-trueCase = [CaseInt 1]
 
 
 translateBindingPair :: MonadReader Env m => QName -> TTerm -> m (Ident, Term)
