@@ -232,10 +232,7 @@ translateTerm = \case
     (Ident var, t1') <- introVar (translateTerm t1)
     return (Mlet [Named (Ident var) var t0'] t1')
   TCase i cinfo deflt alts ->
--- TODO Handle the case where this is not a lazy match if possible.
---    case (caseLazy cinfo) of
---      True -> pure $ error "caseLazy error."
---      False -> return ()
+-- TODO Maybe use caseLazy somewhere.
     do
       t <- dbIndexToMvar i
       d <- translateTerm deflt
@@ -256,29 +253,39 @@ wildcardTerm s = Prim.errorT s
 
 
 
+defaultCase :: [Case]
+defaultCase = [CaseAnyInt, CaseAnyTag]
 
--- TODO Review this code.
-translateTACon :: MonadReader Env m => Term -> [TAlt] -> m ([TAlt] , ([([Case] , Term)] , Induction))
-translateTACon tcase (TACon con arity t : ts) = do
-      usedFields <- snd <$> introVars arity
-         (Set.map (\ix -> arity - ix - 1) . Set.filter (<arity) <$> usedVars t)
-      (vars, t') <- introVars arity (translateTerm t)
+addConFields :: [Ident] -> Term -> Term -> Induction -> Term
+addConFields vars termc body ind = case map bind varsRev of
+  [] -> body
+  binds -> Mlet binds body
+  where
+    varsRev = zip [0..] (reverse vars)
+    bind (ix, Ident iden) =
+      case ind of
+        Inductive -> Named (Ident iden) iden (Mfield ix termc)
+        CoInductive -> Named (Ident iden) iden (Mfield ix (Mforce termc))
 
-      cnr <- askConRep con
-      let (cs , ind) = case cnr of
-                         BlockRep{conTag = tg , conInd' = ind'} -> (CaseTag tg , ind')
-                         IntRep{conTag = tg , conInd' = ind'}   -> (CaseInt tg , ind')
 
-      -- TODO: It is not clear how to deal with bindings in a pattern
-      (rmalts , (rmcs , ind2)) <- translateTACon tcase ts
-      
-      let aind = allInd ind ind2
-      
-      let bt = bindFields vars usedFields tcase t' aind
-      pure (rmalts , ((([cs], bt) : rmcs) , aind))      where
-        allInd Inductive Inductive = Inductive
-        allInd _ _ = CoInductive
-translateTACon _ ts = pure (ts , ([] , Inductive))
+translateTAConS :: MonadReader Env m => Term -> TAlt -> m (([Case] , Term) , Induction)
+translateTAConS tcase (TACon con arity t) = do
+  (vars , t') <- introVars arity (translateTerm t)
+  cnr <- askConRep con
+  let (cs , ind) = case cnr of
+                     BlockRep{conTag = tg , conInd' = ind'} -> (CaseTag tg , ind')
+                     IntRep{conTag = tg , conInd' = ind'}   -> (CaseInt tg , ind')
+  let t'' = addConFields vars tcase t' ind
+  pure (([cs] , t'') , ind)
+translateTAConS _ _ = __IMPOSSIBLE__
+
+
+-- t here is (Var i)
+litToCase :: Term -> Literal -> Term
+litToCase t (LitNat _ i) = Mbiop Eq TBigint t (Mint (CBigint i))
+litToCase t (LitChar _ c) = Mapply (Prim.primCode "primCharEqual") [t , (Mint $ CInt (fromEnum c))]
+litToCase t (LitString _ s) = Mapply (Prim.primCode "string_equality") [t , Mstring s]
+litToCase _ _ = error "Not Implemented"
 
 translateTALit :: MonadReader Env m => Term -> TAlt -> m (Term , Term)
 translateTALit tcase (TALit pat body) = do
@@ -293,6 +300,30 @@ translateTAGuard (TAGuard grd t) = do
        tt  <- translateTerm t
        pure (tgrd , tt)
 translateTAGuard _ = __IMPOSSIBLE__
+
+  
+-- TODO Review this code.
+translateTACon :: MonadReader Env m => Term -> [TAlt] -> m ([TAlt] , ([([Case] , Term)] , Induction))
+translateTACon tcase (TACon con arity t : ts) = do
+      (vars, t') <- introVars arity (translateTerm t)
+
+      cnr <- askConRep con
+      let (cs , ind) = case cnr of
+                         BlockRep{conTag = tg , conInd' = ind'} -> (CaseTag tg , ind')
+                         IntRep{conTag = tg , conInd' = ind'}   -> (CaseInt tg , ind')
+
+      -- TODO: It is not clear how to deal with bindings in a pattern
+      (rmalts , (rmcs , ind2)) <- translateTACon tcase ts
+      
+      let aind = allInd ind ind2
+      
+      let t'' = addConFields vars tcase t' aind
+      pure (rmalts , ((([cs], t'') : rmcs) , aind))      where
+        allInd Inductive Inductive = Inductive
+        allInd _ _ = CoInductive
+translateTACon _ ts = pure (ts , ([] , Inductive))
+
+
 
 
 translateLitOrGuard :: MonadReader Env m => Term -> [TAlt] -> m [(Term , Term)]
@@ -322,30 +353,8 @@ translateTCase tcase defaultt tas = do
     CoInductive -> pure $ Mswitch (Mforce tcase) (cs ++ [(defaultCase , boolCases defaultt grdcs)])
 
 
-defaultCase :: [Case]
-defaultCase = [CaseAnyInt, CaseAnyTag]
 
-bindFields :: [Ident] -> Set Int -> Term -> Term -> Induction -> Term
-bindFields vars used termc body ind = case map bind varsRev of
-  [] -> body
-  binds -> Mlet binds body
-  where
-    varsRev = zip [0..] (reverse vars)
-    bind (ix, Ident iden)
-      -- TODO: we bind all fields. The detection of used fields is bugged.
-      | True || Set.member ix used =
-        case ind of
-          Inductive -> Named (Ident iden) iden (Mfield ix termc)
-          CoInductive -> Named (Ident iden) iden (Mfield ix (Mforce termc))
 
-      | otherwise = Named (Ident iden) iden (wildcardTerm iden)
-
--- t here is (Var i)
-litToCase :: Term -> Literal -> Term
-litToCase t (LitNat _ i) = Mbiop Eq TBigint t (Mint (CBigint i))
-litToCase t (LitChar _ c) = Mapply (Prim.primCode "primCharEqual") [t , (Mint $ CInt (fromEnum c))]
-litToCase t (LitString _ s) = Mapply (Prim.primCode "string_equality") [t , Mstring s]
-litToCase _ _ = error "Not Implemented"
 
 
 
@@ -395,39 +404,6 @@ translateLit l = case l of
 
 
 
-
--- |
--- Set of indices of the variables that are referenced inside the term.
---
--- Example
--- λλ Env{level = 2} usedVars (λ(λ ((Var 3) (λ (Var 4)))) ) == {1}
-usedVars :: MonadReader Env m => TTerm -> m (Set Int)
-usedVars term = asks level >>= go mempty
-   where
-     go vars0 topnext = goterm vars0 term
-       where
-         goterms = foldM (\acvars tt -> goterm acvars tt)
-         goterm vars t = do
-           nextix <- asks level
-           case t of
-             (TVar v) -> return $ govar vars v nextix
-             (TApp t0 args) -> goterms vars (t0:args)
-             (TLam t0) -> snd <$> introVar (goterm vars t0)
-             (TLet t1 t2) -> do
-               vars1 <- goterm vars t1
-               snd <$> introVar (goterm vars1 t2)
-             (TCase v _ def alts) -> do
-               vars1 <- goterm (govar vars v nextix) def
-               foldM (\acvars alt -> goalt acvars alt) vars1 alts
-             _ -> return vars
-         govar vars v nextix
-           | 0 <= v' && v' < topnext = Set.insert v' vars
-           | otherwise = vars
-           where v' = v + topnext - nextix
-         goalt vars alt = case alt of
-           TACon _ _ b -> goterm vars b
-           TAGuard g b -> goterms vars [g, b]
-           TALit{} -> return vars
 
 
 
