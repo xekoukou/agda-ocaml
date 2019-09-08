@@ -16,16 +16,49 @@ caseEq rt ar t ot = case rt == t of
                      True -> ar
                      False -> ot
 
+
+-- Respects shadowing, if a let statement or lambda has bound a specific variable, it does not
+-- replace the term, thus it only replaces on the free variables.
+
 replaceTr :: Term -> Term -> Term -> Term
 replaceTr rt ar self@(Mvar i) = caseEq rt ar self self
-replaceTr rt ar self@(Mlambda a t) = caseEq rt ar self $ Mlambda a (replaceTr rt ar t)
+replaceTr rt ar self@(Mlambda a t) = caseEq rt ar self $ case (allFalse (map ((rt ==) . Mvar) a)) of
+    False  -> Mlambda a t
+    True   -> Mlambda a (replaceTr rt ar t)
+  where
+    allFalse :: [Bool] -> Bool
+    allFalse (False : xs) = allFalse xs
+    allFalse (True : xs) = False
+    allFalse _ = True
 replaceTr rt ar self@(Mapply a bs) = caseEq rt ar self $ let (na : nbs) = map (replaceTr rt ar) (a : bs)
                                                          in Mapply na nbs 
-replaceTr rt ar self@(Mlet bs t) =  caseEq rt ar self $  let nt = replaceTr rt ar t
-                                       in Mlet (map (rpl rt ar) bs) nt where
-  rpl :: Term -> Term -> Binding -> Binding
-  rpl rt ar (Named x cn t) = Named x cn $ replaceTr rt ar t
-  rpl rt ar (Recursive rs) = Recursive (zipWith (\(ix , (cnx , tx)) y -> (ix , (cnx , y))) rs (map (replaceTr rt ar . snd . snd) rs))
+replaceTr rt ar self@(Mlet bs t) =  caseEq rt ar self $ let e = map check bs
+                                    in hf2 (hf (zip e bs)) (allFalse e)   where
+  rpl :: Binding -> Binding
+  rpl (Named x cn t) = Named x cn $ replaceTr rt ar t
+  rpl (Recursive rs) = error "Let bindings cannot be recursive."
+
+  check :: Binding -> Bool
+  check (Named x _ _) = rt == Mvar x
+  check (Recursive rs) = error "Let bindings cannot be recursive."
+
+  allFalse :: [Bool] -> Bool
+  allFalse (False : xs) = allFalse xs
+  allFalse (True : xs) = False
+  allFalse _ = True
+
+  hf :: [(Bool , Binding)] -> [Binding]
+  hf ((False , b) : bs) = rpl b : hf bs
+  hf ((True , b) : bs) = b : hf bs
+  hf [] = []
+  hf _ = __IMPOSSIBLE__
+
+  hf2 :: [Binding] -> Bool -> Term
+  hf2 [] _     = replaceTr rt ar t
+  hf2 bs True  = Mlet bs (replaceTr rt ar t)
+  hf2 bs False = Mlet bs t
+
+  
 replaceTr rt ar self@(Mswitch ta tb) =  caseEq rt ar self $
                                           let nta = replaceTr rt ar ta
                                               ntb = map (replaceTr rt ar . snd) tb
@@ -51,10 +84,6 @@ replaceTr rt ar self@(Mseq ts) = caseEq rt ar self $
 replaceTr rt ar self = caseEq rt ar self self
 
 
-replaceTrL :: [(Term , Term)] -> Term -> Term
-replaceTrL ((x , nx) : ms) t = let (nt : rnms) = map (replaceTr x nx) (t : map snd ms)
-                               in replaceTrL (zip (map fst ms) rnms) nt
-replaceTrL [] t = t
 
 -----------------------------------------------------------
 
@@ -74,6 +103,11 @@ removeLets (Mlet bs t) =  let mt = replaceTrL (map rpl bs) t
   rpl :: Binding -> (Term , Term)
   rpl (Named x _ t) = (Mvar x , t)
   rpl (Recursive rs) = error "Let bindings cannot be recursive."
+
+  replaceTrL :: [(Term , Term)] -> Term -> Term
+  replaceTrL ((x , nx) : ms) t = let (nt : rnms) = map (replaceTr x nx) (t : map snd ms)
+                                 in replaceTrL (zip (map fst ms) rnms) nt
+  replaceTrL [] t = t
   
 removeLets (Mswitch ta tb) = let nta = removeLets ta
                                  ntb = map (removeLets . snd) tb
@@ -300,20 +334,10 @@ removeLetsVar x =  x
 -----------------------------------------------------------
 
 
-perfOpt :: (Term -> Term) -> Term -> Term
-perfOpt f (Mlambda ids t) = Mlambda ids (f t)
-perfOpt f (Mblock tag tms) = Mblock tag (map f tms)
-perfOpt f r = r
-
-
-
--- Used in Functions.
 -- IMPORTANT : removeLets also protects against infinite loops in case of Coinduction.
 -- so it is not just an optimization.
 optimizeLets :: Term -> Term
-optimizeLets (Mlambda ids t) = Mlambda ids (removeLetsVar $ introduceLets $ removeLets t)
-optimizeLets (Mblock tag tms) = Mblock tag (map (removeLetsVar . introduceLets . removeLets) tms)
-optimizeLets r = r
+optimizeLets r = r -- removeLetsVar $ introduceLets $ removeLets r
 
 perfOptB :: (Term -> Term) -> [Binding] -> [Binding]
 perfOptB f (Named id cn t : bs) = Named id cn (f t) : perfOptB f bs
